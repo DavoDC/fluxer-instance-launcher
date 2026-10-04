@@ -513,6 +513,9 @@ Describe 'menu' {
         Get-RunValue $sb 'FluxerInstance' | Should Not BeNullOrEmpty
         (Get-LnkArgs $sb.Desktop).Args | Should Be $script:Flag
         $r.Out | Should Not Match 'my instance'
+        $r.Out | Should Match '(?m)^  - make the Start Menu Fluxer icon open https://chat\.example\.com'
+        $r.Out | Should Match '(?m)^      \w:\\.*Fluxer\.lnk'
+        $r.Out | Should Match 'Changes made:'
     }
     It 'the status shown above the menu reports good after install' {
         $r = Invoke-Menu $sb 'Esc'

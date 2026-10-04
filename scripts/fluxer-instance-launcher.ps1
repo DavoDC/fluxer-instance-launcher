@@ -122,7 +122,7 @@ function Get-Locations {
 function Invoke-Change([string]$Description, [scriptblock]$Do) {
     if ($DryRun) { Write-Host "[dry-run] would: $Description"; return }
     & $Do
-    if ($Description -match '^(.*) \((\w:\.*)\)$') {
+    if ($Description -match '^(.*) \((\w:\\.*)\)$') {
         Write-Host "  - $($Matches[1])"
         Write-Host "      $($Matches[2])" -ForegroundColor DarkGray
     } else { Write-Host "  - $Description" }
@@ -321,6 +321,22 @@ function Show-StatusPlain($cfg, $loc) {
     return $bad
 }
 # ---------- launch ----------
+# Install closes a Fluxer that is open on another server, so its next start uses the new icons.
+function Get-FluxerNotOnServer($cfg, $loc) {
+    try {
+        $all = @(Get-CimInstance Win32_Process -Filter "Name='Fluxer.exe'" | Where-Object { $_.ExecutablePath -eq $loc.FluxerExe })
+    } catch { return @() }
+    $main = @($all | Where-Object { $_.CommandLine -and $_.CommandLine -notmatch '--type=' })
+    if (@($main | Where-Object { $_.CommandLine -notmatch [regex]::Escape("--fluxer-app-url=$($cfg.Url)") }).Count -eq 0) { return @() }
+    return $all
+}
+
+function Stop-FluxerNotOnServer($cfg, $loc) {
+    $procs = @(Get-FluxerNotOnServer $cfg $loc)
+    if ($procs.Count -eq 0) { return }
+    Invoke-Change 'close Fluxer, which was open on another server' { $procs | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } }
+}
+
 function Get-MainFluxerProcess {
     try {
         Get-CimInstance Win32_Process -Filter "Name='Fluxer.exe'" |
@@ -455,6 +471,7 @@ function Invoke-Menu($cfg, $loc) {
             Write-Host "  - make the Fluxer icons you already have (Start Menu, Desktop, taskbar) open $($cfg.Url)"
             if ($cfg.Autostart) { Write-Host '  - open Fluxer on your server when you sign in to Windows' }
             Write-Host "  - turn off Fluxer's own sign-in start, so it does not open the official server"
+            if (@(Get-FluxerNotOnServer $cfg $loc).Count -gt 0) { Write-Host '  - close Fluxer, which is open on another server, so it opens on yours next time' }
             if (@($loc.Legacy | Where-Object { Test-LegacyOwn $_ }).Count -gt 0) { Write-Host '  - delete the old shortcut an earlier version of this setup made' }
             if ($cfg.HandlerPatch) { Write-Host '  - make fluxer:// links open on your server' }
             Write-Host 'It needs no administrator rights, creates no scheduled tasks, and Uninstall undoes it all.'
@@ -463,6 +480,7 @@ function Invoke-Menu($cfg, $loc) {
             Write-Host ''
             Write-Host 'Changes made:'
             Sync-Entries $cfg $loc $false
+            Stop-FluxerNotOnServer $cfg $loc
             Write-Host ''
             Write-Host 'Done. Open Fluxer from its normal Start Menu, Desktop or taskbar icon.'
             return 0
