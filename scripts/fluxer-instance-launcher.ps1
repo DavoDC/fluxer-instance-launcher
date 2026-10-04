@@ -304,12 +304,8 @@ function Show-StatusPlain($cfg, $loc) {
         $hNow = Get-RegValue $loc.HandlerKey '(default)'
         if ($null -ne $hNow -and $hNow -notmatch [regex]::Escape("--fluxer-app-url=$($cfg.Url)")) { Add-Line 'bad' 'fluxer:// links: do not use your server.' }
         else { Add-Line 'good' 'fluxer:// links: open on your server.' }
-    } else {
-        Add-Line 'note' 'fluxer:// links: left as Fluxer set them.'
     }
     if (@($loc.Legacy | Where-Object { Test-LegacyOwn $_ }).Count -gt 0) { Add-Line 'bad' 'Old shortcut made by an earlier version of this setup: still there.' }
-    else { Add-Line 'good' 'Old shortcut made by an earlier version of this setup: none.' }
-    Add-Line 'note' 'Nothing else is changed: no scheduled tasks, services or admin rights.'
 
     $bad = $script:statusBad
     if ($bad -eq 0) { Write-Host "Everything is working. Fluxer opens on your self-hosted server ($($cfg.Url))." -ForegroundColor Green }

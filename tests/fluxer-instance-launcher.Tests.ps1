@@ -270,7 +270,6 @@ Describe 'status' {
         $after.Out | Should Match '  - Sign-in start: Fluxer opens on your server when you sign in to Windows\.'
         $after.Out | Should Match '  - Fluxer''s own sign-in start: off'
         $after.Out | Should Match '  - Desktop icon: not there, nothing to change\.'
-        $after.Out | Should Match 'no scheduled tasks'
     }
     It 'exits 1 if Fluxer re-added its own autostart' {
         Set-FluxerOwnRun $sb
