@@ -6,6 +6,8 @@ How Claude verifies: run `Invoke-Pester tests` and `python -m pytest tests`, the
 
 Logs: every run writes one file `logs/YYYY-MM-DD_HH-MM-SS_<action>.log` at the repo root (gitignored, created on first use) with every line timestamped. Logging is a side channel only (`Write-Log`) and never changes the terminal output or the exit code. Tests pass a sandbox `-LogDir` so they never write the real folder.
 
+Owner rule: Uninstall must undo absolutely everything Install did, so after Uninstall the status reads as it did before the first Install. When Install changes, Uninstall changes in the same commit; the round-trip test in `tests` (Install then Uninstall compares registry values, every icon's Arguments and `watch_updates`) guards it. Install saves what it overwrites (Fluxer's own `Fluxer.Fluxer` Run value: exact value and type) in the gitignored `data/state.json`, never overwriting an earlier saved original, and Uninstall puts it back. The only things Uninstall cannot undo: deleting a legacy shortcut an earlier version made, and closing a Fluxer that was open on another server. The settings file and logs are the tool's own files and stay.
+
 The terminal design (menu, status, Install and Uninstall output, bat banner) is locked: change it only with the repo owner's explicit approval in that session.
 
 Rules: `config/config.json` is gitignored and created by the script from an embedded template when missing; `config/config.example.json` is documentation only and no code may read it. No secrets, no network calls, no admin rights, no Fluxer code or logos copied. Keep this repo free of private workspace paths and other people's names. MIT licensed.
@@ -23,7 +25,7 @@ With no action the script shows the status, then a menu (Install, Uninstall, Qui
 | `watch` | Opt-in (`watch_updates`). Launches like `launch`, then waits (`FileSystemWatcher`, no polling) on the folders holding Fluxer's icons; after a change settles (5 s) it runs the `apply` logic, closes Fluxer if open on another server and reopens it on yours. Test hook: env `FLI_TEST_WATCH_ONCE=<seconds>` skips the first launch, handles one change or times out, then exits. |
 | `repair` | Same as `apply`, silent when nothing drifted. Runs 15 seconds after each `launch`. |
 | `status` | Prints a plain summary, then dot points. Exit 0 if all is well, 1 otherwise. |
-| `uninstall` | Takes only the `--fluxer-app-url` argument off the Fluxer icons and removes the Run value. |
+| `uninstall` | Takes only the `--fluxer-app-url` argument off the Fluxer icons removes the Run value, restores Fluxer's own `Fluxer.Fluxer` Run value from `data/state.json` and resets `watch_updates` to false. |
 
 Options: `-DryRun` prints instead of changing; `-Yes` skips the menu's confirmation; `-AllowInsecure` permits `http://`; `-ConfigPath`, `-Root` and `-RegistryBase` redirect config, icons and registry writes (the tests use these on a throwaway key and folder). Exit codes: 0 ok, 1 status problem, 2 error, 3 settings file just created (or Fluxer running elsewhere on `launch`).
 

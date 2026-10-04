@@ -41,7 +41,7 @@ When you pick **Install**, the setup asks whether to keep Fluxer on your server 
 
 ## Uninstall
 
-Double-click `Fluxer Instance Setup.bat` and pick **Uninstall**. Fluxer itself is never touched.
+Double-click `Fluxer Instance Setup.bat` and pick **Uninstall**. Fluxer itself is never touched, and Uninstall puts Fluxer back exactly as it was before you installed.
 
 ## Licence
 

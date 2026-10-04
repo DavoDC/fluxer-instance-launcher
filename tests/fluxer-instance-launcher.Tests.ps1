@@ -829,3 +829,111 @@ Describe 'Install and apply start the update helper right away' {
     }
     Remove-Sandbox $sb
 }
+
+# ---------- Uninstall undoes everything Install did (round trip) ----------
+function Get-RunSnapshot($sb) {
+    $k = Join-Path $sb.Reg 'Microsoft\Windows\CurrentVersion\Run'
+    if (-not (Test-Path $k)) { return '' }
+    $o = Get-Item $k
+    ($o.GetValueNames() | Sort-Object | ForEach-Object { '{0}={1}|{2}' -f $_, $o.GetValue($_, $null, 'DoNotExpandEnvironmentNames'), $o.GetValueKind($_) }) -join "`n"
+}
+function Get-IconSnapshot($sb) { (@('Desktop', 'Start', 'Task') | ForEach-Object { "$_=" + (Get-LnkArgs $sb.$_).Args }) -join "`n" }
+function Get-WatchSetting($sb) { $c = Get-Content -Raw $sb.Config | ConvertFrom-Json; [bool]$c.watch_updates }
+
+Describe 'Install then Uninstall puts everything back as it was' {
+    $sb = New-Sandbox
+    Set-TestConfig $sb
+    New-FluxerIcons $sb
+    Set-FluxerOwnRun $sb
+    $k = Join-Path $sb.Reg 'Microsoft\Windows\CurrentVersion\Run'
+    Set-ItemProperty -Path $k -Name 'SomethingElse' -Value 'keep-me'
+    $runBefore = Get-RunSnapshot $sb
+    $iconsBefore = Get-IconSnapshot $sb
+    $watchBefore = Get-WatchSetting $sb
+    $i = Invoke-Menu $sb 'Enter,Y,Y'
+    $afterInstall = Get-RunSnapshot $sb
+    $u = Invoke-Menu $sb 'Down,Enter,Y'
+    It 'Install really changed things (the test is not vacuous)' {
+        $afterInstall | Should Not Be $runBefore
+        Get-WatchSetting $sb | Should Be $false
+    }
+    It 'restores the exact registry values, with FluxerInstance gone' {
+        Get-RunSnapshot $sb | Should Be $runBefore
+        Get-RunValue $sb 'FluxerInstance' | Should BeNullOrEmpty
+        Get-RunValue $sb 'Fluxer.Fluxer' | Should Be '"C:\FakeFluxer\Fluxer.exe"'
+    }
+    It 'restores every icon Arguments and the update choice' {
+        Get-IconSnapshot $sb | Should Be $iconsBefore
+        Get-WatchSetting $sb | Should Be $watchBefore
+    }
+    It 'says so in plain past tense in the done list' {
+        $u.Out | Should Match 'turned Fluxer''s own sign-in start back on'
+    }
+    It 'status afterwards reports Fluxer''s own sign-in start as on, as a fact' {
+        $r = Invoke-Launcher $sb 'status'
+        $r.Out | Should Match '  - Fluxer''s own sign-in start: on\.'
+        $r.Out | Should Not Match 'own sign-in start: off'
+    }
+    It 'a second Install and Uninstall still restores the first original' {
+        Invoke-Menu $sb 'Enter,Y,Y' | Out-Null
+        Get-RunValue $sb 'Fluxer.Fluxer' | Should BeNullOrEmpty
+        Invoke-Menu $sb 'Down,Enter,Y' | Out-Null
+        Get-RunSnapshot $sb | Should Be $runBefore
+        Get-IconSnapshot $sb | Should Be $iconsBefore
+    }
+    Remove-Sandbox $sb
+}
+
+Describe 'saved original of Fluxer own sign-in start' {
+    $sb = New-Sandbox
+    Set-TestConfig $sb
+    New-FluxerIcons $sb
+    Set-FluxerOwnRun $sb
+    $state = Join-Path $sb.Dir 'data\state.json'
+    Invoke-Launcher $sb 'apply' | Out-Null
+    It 'is saved before the value is deleted' {
+        Test-Path $state | Should Be $true
+        (Get-Content -Raw $state) | Should Match 'FakeFluxer'
+    }
+    It 'is not overwritten by a later absent reading' {
+        Invoke-Launcher $sb 'apply' | Out-Null
+        (Get-Content -Raw $state) | Should Match 'FakeFluxer'
+    }
+    It 'is removed from the saved file once restored' {
+        Invoke-Launcher $sb 'uninstall' | Out-Null
+        Get-RunValue $sb 'Fluxer.Fluxer' | Should Be '"C:\FakeFluxer\Fluxer.exe"'
+        (Get-Content -Raw $state) | Should Not Match 'FakeFluxer'
+    }
+    Remove-Sandbox $sb
+}
+
+Describe 'Uninstall with nothing saved never invents a value' {
+    $sb = New-Sandbox
+    Set-TestConfig $sb
+    New-FluxerIcons $sb
+    Invoke-Launcher $sb 'apply' | Out-Null
+    $r = Invoke-Launcher $sb 'uninstall'
+    It 'leaves Fluxer.Fluxer absent and does not claim to have turned it on' {
+        $r.Code | Should Be 0
+        Get-RunValue $sb 'Fluxer.Fluxer' | Should BeNullOrEmpty
+        $r.Out | Should Not Match 'sign-in start back on'
+    }
+    Remove-Sandbox $sb
+}
+
+Describe 'status wording for Fluxer own sign-in start' {
+    $sb = New-Sandbox
+    Set-TestConfig $sb
+    New-FluxerIcons $sb
+    Set-FluxerOwnRun $sb
+    It 'is a note, not a problem, while our sign-in start is not installed' {
+        $r = Invoke-Launcher $sb 'status'
+        $r.Out | Should Match '  - Fluxer''s own sign-in start: on\.'
+    }
+    It 'is a problem when our sign-in start is installed and Fluxer''s is on' {
+        $k = Join-Path $sb.Reg 'Microsoft\Windows\CurrentVersion\Run'
+        Set-ItemProperty -Path $k -Name 'FluxerInstance' -Value 'x'
+        (Invoke-Launcher $sb 'status').Out | Should Match 'own sign-in start: on, so Fluxer will open on the official server'
+    }
+    Remove-Sandbox $sb
+}

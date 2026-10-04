@@ -157,6 +157,8 @@ function Get-Locations {
         Legacy     = @((Join-Path $desk 'Fluxer (my instance).lnk'), (Join-Path $menu 'Fluxer (my instance).lnk'))
         FluxerExe  = $exe
         RunKey     = Join-Path $RegistryBase 'Microsoft\Windows\CurrentVersion\Run'
+        # Gitignored saved originals (what Install changed, so Uninstall can put it back). Sandboxed under -Root.
+        StatePath  = if ($Root) { Join-Path $Root 'data\state.json' } else { Join-Path $PSScriptRoot '..\data\state.json' }
     }
 }
 
@@ -177,6 +179,28 @@ function Get-RegValue([string]$Key, [string]$Name) {
     if (-not (Test-Path $Key)) { return $null }
     $p = Get-ItemProperty -Path $Key -Name $Name -ErrorAction SilentlyContinue
     if ($p) { $p.$Name } else { $null }
+}
+
+# ---------- saved originals (state file) ----------
+function Read-State([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path)) { return [pscustomobject]@{} }
+    try { $o = Get-Content -Raw -LiteralPath $Path | ConvertFrom-Json } catch { Write-Log "state: $Path is not valid JSON, treated as empty"; return [pscustomobject]@{} }
+    if ($null -eq $o) { [pscustomobject]@{} } else { $o }
+}
+function Write-State([string]$Path, $State) {
+    [void][System.IO.Directory]::CreateDirectory((Split-Path -Parent ([System.IO.Path]::GetFullPath($Path))))
+    ($State | ConvertTo-Json -Depth 5) | Set-Content -LiteralPath $Path -Encoding UTF8
+}
+# Saves the exact current value and type of Fluxer's own Run value, unless an original is already saved.
+function Save-FluxerRunOriginal($loc) {
+    $state = Read-State $loc.StatePath
+    if ($null -ne $state.PSObject.Properties['fluxer_run_original']) { Write-Log 'state: original of Fluxer own Run value already saved, keeping it'; return }
+    $key = Get-Item -Path $loc.RunKey
+    $val = $key.GetValue($FluxerRunValueName, $null, 'DoNotExpandEnvironmentNames')
+    $kind = [string]$key.GetValueKind($FluxerRunValueName)
+    Add-Member -InputObject $state -NotePropertyName 'fluxer_run_original' -NotePropertyValue ([pscustomobject]@{ value = $val; kind = $kind })
+    Write-State $loc.StatePath $state
+    Write-Log "state: saved original of $FluxerRunValueName (kind $kind) to $($loc.StatePath)"
 }
 
 function Get-ExpectedRunValue($cfg) {
@@ -254,7 +278,7 @@ function Sync-Entries($cfg, $loc, [bool]$Quiet) {
 
     # 2. Fluxer's own autostart value would start the official instance
     if ($null -ne (Get-RegValue $loc.RunKey $FluxerRunValueName)) {
-        Invoke-Change "delete Fluxer's own Run value $FluxerRunValueName" { Remove-ItemProperty -Path $loc.RunKey -Name $FluxerRunValueName } 'turned off Fluxer''s own sign-in start'
+        Invoke-Change "delete Fluxer's own Run value $FluxerRunValueName" { Save-FluxerRunOriginal $loc; Remove-ItemProperty -Path $loc.RunKey -Name $FluxerRunValueName } 'turned off Fluxer''s own sign-in start'
         $script:ChangeCount++
     } else { Write-Log "sync: Fluxer's own Run value $FluxerRunValueName not present, ok" }
 
@@ -339,6 +363,7 @@ function Show-StatusPlain($cfg, $loc) {
         else { Add-Line 'bad' 'Update watcher: on in your settings, but not set up, so a Fluxer update can undo your server.' }
     }
     if ($null -eq (Get-RegValue $loc.RunKey $FluxerRunValueName)) { Add-Line 'good' "Fluxer's own sign-in start: off, so it will not open on the official server." }
+    elseif ($null -eq $runNow) { Add-Line 'note' "Fluxer's own sign-in start: on." }
     else { Add-Line 'bad' "Fluxer's own sign-in start: on, so Fluxer will open on the official server when you sign in to Windows." }
 
     if (@($loc.Legacy | Where-Object { Test-LegacyOwn $_ }).Count -gt 0) { Add-Line 'bad' 'Old shortcut made by an earlier version of this setup: still there.' }
@@ -509,6 +534,33 @@ function Watch-Icons($cfg, $loc) {
 }
 
 # ---------- uninstall ----------
+# Puts Fluxer's own sign-in start back exactly as Install found it. Never invents a value: with nothing saved it only logs.
+function Restore-FluxerRunOriginal($loc) {
+    $state = Read-State $loc.StatePath
+    $saved = $state.PSObject.Properties['fluxer_run_original']
+    if ($null -eq $saved) { Write-Log "uninstall: no saved original of $FluxerRunValueName, leaving it as it is"; return }
+    $orig = $saved.Value
+    if ($null -ne (Get-RegValue $loc.RunKey $FluxerRunValueName)) {
+        Write-Log "uninstall: $FluxerRunValueName is already present, not overwriting it; dropping the saved original"
+    } else {
+        $kind = if ($orig.kind -eq 'ExpandString') { 'ExpandString' } elseif ($orig.kind -eq 'DWord') { 'DWord' } else { 'String' }
+        $val = $orig.value
+        Invoke-Change "restore Fluxer's own Run value $FluxerRunValueName" { if (-not (Test-Path $loc.RunKey)) { New-Item -Path $loc.RunKey -Force | Out-Null }; Set-ItemProperty -Path $loc.RunKey -Name $FluxerRunValueName -Value $val -Type $kind } 'turned Fluxer''s own sign-in start back on'
+    }
+    if (-not $DryRun) {
+        $state.PSObject.Properties.Remove('fluxer_run_original')
+        Write-State $loc.StatePath $state
+        Write-Log 'uninstall: removed the saved original from the state file'
+    }
+}
+
+# Install's menu question saves watch_updates; Uninstall puts the choice back to off (other keys stay).
+function Reset-WatchChoice {
+    $c = Get-Content -Raw -Path $ConfigPath | ConvertFrom-Json
+    if ($c.watch_updates -ne $true) { Write-Log 'uninstall: watch_updates is not on in the settings, nothing to reset'; return }
+    Invoke-Change 'turn off the update helper choice in your settings file' { Save-WatchChoice $false } "turned off the update helper choice in your settings ($([System.IO.Path]::GetFullPath($ConfigPath)))"
+}
+
 function Remove-Entries($cfg, $loc) {
     Write-Host ''
     Write-Host 'Uninstall done:'
@@ -516,6 +568,8 @@ function Remove-Entries($cfg, $loc) {
         Invoke-Change "remove Run value $RunValueName" { Remove-ItemProperty -Path $loc.RunKey -Name $RunValueName } 'removed the sign-in start'
     } else { Write-Log "uninstall: Run value $RunValueName not present in $($loc.RunKey)" }
     Stop-Watchers
+    Restore-FluxerRunOriginal $loc
+    Reset-WatchChoice
     foreach ($icon in $loc.Icons) {
         if (-not (Test-Path $icon.Path)) { Write-Log "uninstall: $($icon.Name) icon not present: $($icon.Path)"; continue }
         $cur = Get-LnkArguments $icon.Path
