@@ -8,7 +8,7 @@ Makes the Fluxer desktop app open on a self-hosted server instead of the officia
 - Unofficial, not affiliated with the Fluxer project.
 - Is it safe? See [SECURITY.md](docs/SECURITY.md).
 
-## Set up
+## Setup
 
 1. Install the Fluxer desktop app from [fluxer.app/download](https://fluxer.app/download).
 2. Close Fluxer completely: right-click its tray icon and pick **Quit Fluxer**.
@@ -25,7 +25,7 @@ Makes the Fluxer desktop app open on a self-hosted server instead of the officia
    - It also opens on your server when you sign in to Windows.
    - The setup adds no icons. It only changes the ones Fluxer already has.
 
-## Check it
+## Check that it works
 
 - The top of the setup window always shows the status in plain words.
 - If something is wrong, pick **Install** and it is put right.
@@ -35,11 +35,11 @@ Makes the Fluxer desktop app open on a self-hosted server instead of the officia
 
 Every Fluxer update undoes the setup, and Fluxer restarts on the official server. To fix it:
 
-1. Close Fluxer completely: right-click its tray icon and pick **Quit Fluxer**.
-2. Double-click `Fluxer Instance Setup.bat`.
-3. Pick **Install**, then open Fluxer from its normal icon.
+1. Double-click `Fluxer Instance Setup.bat`.
+2. Pick **Install**. It closes Fluxer for you.
+3. Open Fluxer from its normal Start Menu or taskbar icon.
 
-## Remove it
+## Uninstall
 
 Double-click `Fluxer Instance Setup.bat` and pick **Uninstall**. Fluxer itself is never touched.
 
