@@ -19,7 +19,7 @@ function New-Sandbox {
     New-Item -ItemType Directory -Path (Split-Path -Parent $exe) -Force | Out-Null
     'x' | Set-Content $exe
     [pscustomobject]@{
-        Dir = $dir; Reg = $reg; Config = (Join-Path $dir 'config.json'); Exe = $exe
+        Dir = $dir; Reg = $reg; LogDir = (Join-Path $dir 'logs'); Config = (Join-Path $dir 'config.json'); Exe = $exe
         Desktop = (Join-Path $dir 'Desktop\Fluxer.lnk')
         Start   = (Join-Path $dir 'StartMenu\Fluxer Platform AB\Fluxer.lnk')
         Task    = (Join-Path $dir 'Taskbar\Fluxer.lnk')
@@ -55,7 +55,7 @@ function New-FluxerIcons($sb, [string]$arguments = '', [string[]]$which = @('Des
 # Runs the launcher in a child process; returns @{Code; Out}.
 function Invoke-Launcher($sb, [string]$Action, [string[]]$Extra = @()) {
     $args2 = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $script:Ps1, $Action,
-        '-ConfigPath', $sb.Config, '-Root', $sb.Dir, '-RegistryBase', $sb.Reg, '-FluxerExe', $sb.Exe) + $Extra
+        '-ConfigPath', $sb.Config, '-Root', $sb.Dir, '-RegistryBase', $sb.Reg, '-FluxerExe', $sb.Exe, '-LogDir', $sb.LogDir) + $Extra
     $out = & powershell.exe @args2 2>&1 | Out-String
     @{ Code = $LASTEXITCODE; Out = $out }
 }
@@ -419,7 +419,7 @@ Describe 'no network code in the launcher' {
 Describe 'Fluxer Instance Setup.bat' {
     $sb = New-Sandbox
     Set-TestConfig $sb
-    $out = & $script:Bat --no-pause status -ConfigPath $sb.Config -Root $sb.Dir -RegistryBase $sb.Reg -FluxerExe $sb.Exe 2>&1 | Out-String
+    $out = & $script:Bat --no-pause status -ConfigPath $sb.Config -Root $sb.Dir -RegistryBase $sb.Reg -FluxerExe $sb.Exe -LogDir $sb.LogDir 2>&1 | Out-String
     $code = $LASTEXITCODE
     It 'passes args through, prints a timing banner and returns the ps1 exit code' {
         $code | Should Be 1
@@ -441,7 +441,7 @@ function Invoke-Menu($sb, [string]$Keys, [string[]]$Extra = @()) {
     $env:FLI_TEST_KEYS = $Keys
     try {
         $args2 = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $script:Ps1,
-            '-ConfigPath', $sb.Config, '-Root', $sb.Dir, '-RegistryBase', $sb.Reg, '-FluxerExe', $sb.Exe) + $Extra
+            '-ConfigPath', $sb.Config, '-Root', $sb.Dir, '-RegistryBase', $sb.Reg, '-FluxerExe', $sb.Exe, '-LogDir', $sb.LogDir) + $Extra
         $out = & powershell.exe @args2 2>&1 | Out-String
         @{ Code = $LASTEXITCODE; Out = $out }
     } finally { Remove-Item Env:\FLI_TEST_KEYS -ErrorAction SilentlyContinue }
@@ -515,9 +515,67 @@ Describe 'menu is not shown when an action is passed or stdin is redirected' {
         $r.Out | Should Not Match 'Use the arrow keys'
     }
     It 'no action and redirected stdin prints the usage line instead of hanging' {
-        $out = '' | & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script:Ps1 -ConfigPath $sb.Config -Root $sb.Dir -RegistryBase $sb.Reg 2>&1 | Out-String
+        $out = '' | & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script:Ps1 -ConfigPath $sb.Config -Root $sb.Dir -RegistryBase $sb.Reg -LogDir $sb.LogDir 2>&1 | Out-String
         $LASTEXITCODE | Should Be 2
         $out | Should Match 'Usage'
+    }
+    Remove-Sandbox $sb
+}
+
+Describe 'per-run log' {
+    $sb = New-Sandbox
+    Set-TestConfig $sb
+    New-FluxerIcons $sb
+    $dry = Invoke-Launcher $sb 'apply' @('-DryRun')
+    $dryLogs = @(Get-ChildItem $sb.LogDir -Filter '*.log')
+    $r = Invoke-Launcher $sb 'apply'
+    $allLogs = @(Get-ChildItem $sb.LogDir -Filter '*.log')
+    $applyLog = @($allLogs | Where-Object { $_.FullName -ne $dryLogs[0].FullName })[0]
+    $text = if ($applyLog) { Get-Content -Raw $applyLog.FullName } else { '' }
+    $dryText = Get-Content -Raw $dryLogs[0].FullName
+
+    It 'creates exactly one log file per run, named with date, time and action' {
+        $dryLogs.Count | Should Be 1
+        $allLogs.Count | Should Be 2
+        $dryLogs[0].Name | Should Match '^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_apply(_\d+)?\.log$'
+    }
+    It 'timestamps every line' {
+        $lines = @($text -split "`r?`n" | Where-Object { $_ })
+        $lines.Count | Should BeGreaterThan 3
+        @($lines | Where-Object { $_ -notmatch '^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} ' }).Count | Should Be 0
+    }
+    It 'logs the action, instance URL, exe path, changes and exit code' {
+        $text | Should Match "action 'apply'"
+        $text | Should Match 'instance URL: https://chat.example.com'
+        $text | Should Match ([regex]::Escape($sb.Exe))
+        $text | Should Match 'change: set Run value FluxerInstance'
+        $text | Should Match ([regex]::Escape($sb.Desktop))
+        $text | Should Match 'Arguments old'
+        $text | Should Match 'exit code 0, duration'
+    }
+    It 'dry-run logs would lines and changes nothing' {
+        $dryText | Should Match 'dry-run: would: set Run value FluxerInstance'
+        $dryText | Should Not Match 'change done:'
+    }
+    It 'terminal output has no log mention' {
+        $r.Out | Should Not Match '\.log'
+    }
+    Remove-Sandbox $sb
+}
+
+Describe 'logging failure never breaks a run' {
+    $sb = New-Sandbox
+    Set-TestConfig $sb
+    New-FluxerIcons $sb
+    $blocker = Join-Path $sb.Dir 'iamafile'
+    'x' | Set-Content $blocker
+    $sb.LogDir = Join-Path $blocker 'logs'
+    $r = Invoke-Launcher $sb 'status'
+    It 'still exits normally and prints nothing about the log' {
+        $r.Code | Should Be 1
+        $r.Out | Should Match 'Something needs fixing'
+        $r.Out | Should Not Match 'log'
+        $r.Out | Should Not Match 'ERROR'
     }
     Remove-Sandbox $sb
 }

@@ -24,6 +24,7 @@ param(
     [string]$Root,
     [string]$RegistryBase = 'HKCU:\Software',
     [string]$FluxerExe,
+    [string]$LogDir,
     [int]$DelaySeconds = 0,
     [switch]$DryRun,
     [switch]$AllowInsecure,
@@ -38,9 +39,48 @@ $FluxerRunValueName = 'Fluxer.Fluxer'
 $ScriptPath = $PSCommandPath
 $PowerShellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 
+# ---------- log (side channel only: never prints, never throws) ----------
+$script:LogFile = $null
+function Write-Log([string]$Message) {
+    if (-not $script:LogFile) { return }
+    try {
+        $line = '{0} {1}' -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss.fff'), $Message
+        [System.IO.File]::AppendAllText($script:LogFile, $line + [Environment]::NewLine, [System.Text.Encoding]::UTF8)
+    } catch { }
+}
+
+function Initialize-Log {
+    try {
+        $dir = if ($LogDir) { $LogDir } else { Join-Path $PSScriptRoot '..\logs' }
+        $dir = [System.IO.Path]::GetFullPath($dir)
+        [void][System.IO.Directory]::CreateDirectory($dir)
+        $name = if ($Action) { $Action } else { 'menu' }
+        $stamp = (Get-Date).ToString('yyyy-MM-dd_HH-mm-ss')
+        $file = Join-Path $dir "${stamp}_$name.log"
+        $n = 2
+        while (Test-Path -LiteralPath $file) { $file = Join-Path $dir "${stamp}_${name}_$n.log"; $n++ }
+        [System.IO.File]::AppendAllText($file, '', [System.Text.Encoding]::UTF8)
+        $script:LogFile = $file
+    } catch { $script:LogFile = $null }
+}
+
+function Exit-Run([int]$Code) {
+    Write-Log ('exit code {0}, duration {1:N3}s' -f $Code, $sw.Elapsed.TotalSeconds)
+    exit $Code
+}
+
+trap {
+    Write-Log "ERROR (unhandled): $($_.Exception.Message)"
+    Write-Log "stack: $($_.ScriptStackTrace)"
+    Write-Log "detail: $($_ | Out-String)"
+    Write-Log ('exit code 1 (unhandled error), duration {0:N3}s' -f $sw.Elapsed.TotalSeconds)
+    break
+}
+
 function Stop-WithError([string]$Message) {
     Write-Host "ERROR: $Message"
-    exit 2
+    Write-Log "ERROR: $Message"
+    Exit-Run 2
 }
 
 # ---------- config ----------
@@ -60,13 +100,16 @@ function Get-Config {
         $full = [System.IO.Path]::GetFullPath($path)
         if ($DryRun) {
             Write-Host "[dry-run] would create your settings file at $full (it does not exist yet)"
+            Write-Log "dry-run: would create config file $full from the built-in template"
         } else {
             New-Item -ItemType Directory -Path (Split-Path -Parent $full) -Force | Out-Null
             Set-Content -Path $full -Value $DefaultConfigJson -Encoding UTF8
             Write-Host "Created your settings file at $full. Open it, check the instance address, save, then run this again."
+            Write-Log "created config file $full from the built-in template"
         }
-        exit 3
+        Exit-Run 3
     }
+    Write-Log "config path: $([System.IO.Path]::GetFullPath($path))"
     try { $c = Get-Content -Raw -Path $path | ConvertFrom-Json } catch { Stop-WithError "Config is not valid JSON: $path" }
     $get = { param($n, $d) if ($null -ne $c.$n) { $c.$n } else { $d } }
     [pscustomobject]@{
@@ -117,8 +160,10 @@ function Get-Locations {
 
 # ---------- helpers ----------
 function Invoke-Change([string]$Description, [scriptblock]$Do, [string]$Done = '') {
-    if ($DryRun) { Write-Host "[dry-run] would: $Description"; return }
+    if ($DryRun) { Write-Host "[dry-run] would: $Description"; Write-Log "dry-run: would: $Description"; return }
+    Write-Log "change: $Description"
     & $Do
+    Write-Log "change done: $Description"
     $text = if ($Done) { $Done } else { $Description }
     if ($text -match '^(.*) \((\w:\\.*)\)$') {
         Write-Host "  - $($Matches[1])"
@@ -187,13 +232,18 @@ function Sync-Entries($cfg, $loc, [bool]$Quiet) {
 
     # 1. our Run value
     $runNow = Get-RegValue $loc.RunKey $RunValueName
+    Write-Log "sync: Run key $($loc.RunKey), value $RunValueName currently: $(if ($null -eq $runNow) { '(not present)' } else { $runNow })"
     if ($cfg.Autostart) {
         $want = Get-ExpectedRunValue $cfg
+        if ($runNow -eq $want) { Write-Log "sync: Run value $RunValueName already ok" }
         if ($runNow -ne $want) {
+            Write-Log "sync: Run value $RunValueName needs change, new value: $want"
             # New-Item -Force on an existing key wipes its values, so create only when absent.
             Invoke-Change "set Run value $RunValueName" { if (-not (Test-Path $loc.RunKey)) { New-Item -Path $loc.RunKey -Force | Out-Null }; Set-ItemProperty -Path $loc.RunKey -Name $RunValueName -Value $want } 'set Fluxer to open on your server when you sign in to Windows'
             $script:ChangeCount++
         }
+    } elseif ($null -eq $runNow) {
+        Write-Log "sync: autostart off in config, Run value $RunValueName not present, ok"
     } elseif ($null -ne $runNow) {
         Invoke-Change "remove Run value $RunValueName (autostart is off in config)" { Remove-ItemProperty -Path $loc.RunKey -Name $RunValueName } 'removed the sign-in start, as your settings say'
         $script:ChangeCount++
@@ -203,14 +253,17 @@ function Sync-Entries($cfg, $loc, [bool]$Quiet) {
     if ($null -ne (Get-RegValue $loc.RunKey $FluxerRunValueName)) {
         Invoke-Change "delete Fluxer's own Run value $FluxerRunValueName" { Remove-ItemProperty -Path $loc.RunKey -Name $FluxerRunValueName } 'turned off Fluxer''s own sign-in start'
         $script:ChangeCount++
-    }
+    } else { Write-Log "sync: Fluxer's own Run value $FluxerRunValueName not present, ok" }
 
     # 3. Fluxer's own icons: make each existing one carry the flag
     foreach ($icon in $loc.Icons) {
-        if (-not (Test-Path $icon.Path)) { continue }
+        if (-not (Test-Path $icon.Path)) { Write-Log "sync: $($icon.Name) icon not present: $($icon.Path)"; continue }
         $cur = Get-LnkArguments $icon.Path
-        if ((Get-FlagState $cur $cfg.Url) -ne 'ok') {
+        $state = Get-FlagState $cur $cfg.Url
+        Write-Log "sync: $($icon.Name) icon $($icon.Path) state $state, Arguments: '$cur'"
+        if ($state -ne 'ok') {
             $want = Set-UrlFlag $cur $cfg.Url
+            Write-Log "sync: $($icon.Name) icon needs change, Arguments old: '$cur' new: '$want'"
             $lnkPath = $icon.Path
             Invoke-Change "make the $($icon.Name) Fluxer icon open $($cfg.Url) ($lnkPath)" { Set-LnkArguments $lnkPath $want } "made the $($icon.Name) icon open $($cfg.Url) ($lnkPath)"
             $script:ChangeCount++
@@ -222,9 +275,10 @@ function Sync-Entries($cfg, $loc, [bool]$Quiet) {
         if (Test-LegacyOwn $old) {
             Invoke-Change "delete the old launcher shortcut $old" { Remove-Item -Path $old -Force } "deleted the old shortcut ($old)"
             $script:ChangeCount++
-        }
+        } else { Write-Log "sync: no legacy launcher shortcut at $old" }
     }
 
+    Write-Log "sync: $($script:ChangeCount) change(s) needed or made (quiet=$Quiet)"
     if ($script:ChangeCount -eq 0 -and -not $Quiet) { Write-Host '[ok] everything already in place' }
     $script:ChangeCount = $before + $script:ChangeCount
 }
@@ -239,6 +293,7 @@ function Join-Names([string[]]$Names) {
 # Plain status: summary first, then dot points. Returns the number of problems (0 = all well).
 function Show-StatusPlain($cfg, $loc) {
     if (-not (Test-Path $loc.FluxerExe)) {
+        Write-Log "status: Fluxer exe not found at $($loc.FluxerExe)"
         Write-Host 'Fluxer is not installed yet. Install Fluxer first, then open this setup again.' -ForegroundColor Red
         return 1
     }
@@ -247,6 +302,7 @@ function Show-StatusPlain($cfg, $loc) {
     $bad = 0
     function Add-Line([string]$kind, [string]$text) {
         $lines.Add([pscustomobject]@{ Kind = $kind; Text = $text })
+        Write-Log "status ($kind): $text"
         if ($kind -eq 'bad') { $script:statusBad++ }
     }
     $script:statusBad = 0
@@ -301,7 +357,8 @@ function Get-FluxerNotOnServer($cfg, $loc) {
 
 function Stop-FluxerNotOnServer($cfg, $loc) {
     $procs = @(Get-FluxerNotOnServer $cfg $loc)
-    if ($procs.Count -eq 0) { return }
+    if ($procs.Count -eq 0) { Write-Log 'close: no Fluxer process open on another server'; return }
+    foreach ($p in $procs) { Write-Log "close: Fluxer process PID $($p.ProcessId), path $($p.ExecutablePath), command line: $($p.CommandLine)" }
     Invoke-Change 'close Fluxer, which was open on another server' { $procs | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } } 'closed Fluxer, which was open on another server'
 }
 
@@ -315,9 +372,10 @@ function Get-MainFluxerProcess {
 function Start-Fluxer($cfg, $loc) {
     $flag = "--fluxer-app-url=$($cfg.Url)"
     if ($DelaySeconds -gt 0 -and -not $DryRun) { Write-Host "Waiting $DelaySeconds s before launch"; Start-Sleep -Seconds $DelaySeconds }
-    if ($DryRun) { Write-Host "[dry-run] would run: `"$($loc.FluxerExe)`" $flag"; return 0 }
-    if (-not (Test-Path $loc.FluxerExe)) { Write-Host "ERROR: Fluxer not found at $($loc.FluxerExe). Install Fluxer first."; return 2 }
+    if ($DryRun) { Write-Host "[dry-run] would run: `"$($loc.FluxerExe)`" $flag"; Write-Log "dry-run: would run: `"$($loc.FluxerExe)`" $flag"; return 0 }
+    if (-not (Test-Path $loc.FluxerExe)) { Write-Log "ERROR: Fluxer not found at $($loc.FluxerExe)"; Write-Host "ERROR: Fluxer not found at $($loc.FluxerExe). Install Fluxer first."; return 2 }
     $main = @(Get-MainFluxerProcess)
+    foreach ($p in $main) { Write-Log "launch: Fluxer process found, PID $($p.ProcessId), path $($p.ExecutablePath), command line: $($p.CommandLine)" }
     if ($main.Count -gt 0) {
         if ($main[0].CommandLine -match [regex]::Escape($flag)) { Write-Host 'Fluxer is already running on your instance.'; return 0 }
         if (-not $ForceRestart) {
@@ -325,9 +383,11 @@ function Start-Fluxer($cfg, $loc) {
             return 3
         }
         Write-Host 'Stopping the running Fluxer (-ForceRestart)'
+        foreach ($p in @(Get-Process -Name Fluxer -ErrorAction SilentlyContinue)) { Write-Log "launch: closing Fluxer process PID $($p.Id), path $($p.Path)" }
         Get-Process -Name Fluxer -ErrorAction SilentlyContinue | Stop-Process -Force
         Start-Sleep -Seconds 2
     }
+    Write-Log "launch: running `"$($loc.FluxerExe)`" $flag"
     Start-Process -FilePath $loc.FluxerExe -ArgumentList $flag
     Write-Host "Started Fluxer on $($cfg.Url)"
     if ($cfg.RepairAfterSecs -gt 0) {
@@ -344,12 +404,14 @@ function Remove-Entries($cfg, $loc) {
     Write-Host 'Uninstall done:'
     if ($null -ne (Get-RegValue $loc.RunKey $RunValueName)) {
         Invoke-Change "remove Run value $RunValueName" { Remove-ItemProperty -Path $loc.RunKey -Name $RunValueName } 'removed the sign-in start'
-    }
+    } else { Write-Log "uninstall: Run value $RunValueName not present in $($loc.RunKey)" }
     foreach ($icon in $loc.Icons) {
-        if (-not (Test-Path $icon.Path)) { continue }
+        if (-not (Test-Path $icon.Path)) { Write-Log "uninstall: $($icon.Name) icon not present: $($icon.Path)"; continue }
         $cur = Get-LnkArguments $icon.Path
+        Write-Log "uninstall: $($icon.Name) icon $($icon.Path), Arguments: '$cur'"
         if ((Get-FlagState $cur $cfg.Url) -ne 'official' -or $cur -match '--fluxer-app-url=') {
             $want = Set-UrlFlag $cur ''
+            Write-Log "uninstall: $($icon.Name) icon needs change, Arguments old: '$cur' new: '$want'"
             $lnkPath = $icon.Path
             Invoke-Change "take the server address off the $($icon.Name) Fluxer icon ($lnkPath)" { Set-LnkArguments $lnkPath $want } "took your server off the $($icon.Name) icon ($lnkPath)"
         }
@@ -415,12 +477,12 @@ function Read-Menu {
 }
 
 function Confirm-Yes([string]$Question) {
-    if ($Yes) { return $true }
+    if ($Yes) { Write-Log "menu: '$Question' auto-confirmed by -Yes"; return $true }
     Write-Host "$Question (y/n)"
     while ($true) {
         $k = Read-KeyCode
-        if ($k -eq 89) { return $true }
-        if ($k -eq 78 -or $k -eq 27) { return $false }
+        if ($k -eq 89) { Write-Log "menu: '$Question' answered y"; return $true }
+        if ($k -eq 78 -or $k -eq 27) { Write-Log "menu: '$Question' answered n"; return $false }
     }
 }
 
@@ -428,6 +490,7 @@ function Invoke-Menu($cfg, $loc) {
     $script:MenuCfg = $cfg
     $script:MenuLoc = $loc
     $choice = Read-Menu
+    Write-Log "menu: choice $(if ($null -eq $choice) { 'Quit (Esc)' } else { $choice })"
     if ($null -eq $choice -or $choice -eq 'Quit') { return 0 }
     Write-Host ''
     switch ($choice) {
@@ -462,21 +525,27 @@ function Invoke-Menu($cfg, $loc) {
 
 # ---------- main ----------
 $script:ChangeCount = 0
+Initialize-Log
+Write-Log ("run start: action '{0}', arguments: {1}" -f $(if ($Action) { $Action } else { 'menu' }), (($PSBoundParameters.GetEnumerator() | ForEach-Object { "-$($_.Key) $($_.Value)" }) -join ' '))
+Write-Log "script: $ScriptPath, PowerShell $($PSVersionTable.PSVersion), user $env:USERNAME"
 if ($Action -eq '' -and $null -eq $env:FLI_TEST_KEYS -and [Console]::IsInputRedirected) {
     Write-Host 'Usage: run "Fluxer Instance Setup.bat" with no arguments for the menu, or pass an action: launch, apply, repair, status, uninstall (options: -DryRun, -Yes).'
-    exit 2
+    Write-Log 'ERROR: no action and input is redirected, printed usage'
+    Exit-Run 2
 }
 $cfg = Get-Config
+Write-Log "instance URL: $($cfg.Url), autostart: $($cfg.Autostart), autostart delay: $($cfg.AutostartDelay)s, repair after launch: $($cfg.RepairAfterSecs)s"
 if ($Action -ne 'uninstall') {
     $err = Test-InstanceUrl $cfg.Url
     if ($err) { Stop-WithError $err }
 }
 $loc = Get-Locations
-if ($DryRun) { Write-Host '(dry run: nothing will be changed)' }
+Write-Log "Fluxer exe: $($loc.FluxerExe) (exists: $(Test-Path $loc.FluxerExe)), Run key: $($loc.RunKey)"
+if ($DryRun) { Write-Host '(dry run: nothing will be changed)'; Write-Log 'dry run: nothing will be changed' }
 $code = 0
 if ($Action -eq '') {
     $code = Invoke-Menu $cfg $loc
-    exit $code
+    Exit-Run $code
 }
 switch ($Action) {
     'apply'     { Sync-Entries $cfg $loc $false }
@@ -486,4 +555,4 @@ switch ($Action) {
     'launch'    { $code = Start-Fluxer $cfg $loc }
 }
 if ($Action -ne 'repair' -or $script:ChangeCount -gt 0) { Write-Host ('Done in {0:N1}s (exit {1})' -f $sw.Elapsed.TotalSeconds, $code) }
-exit $code
+Exit-Run $code

@@ -18,6 +18,8 @@ Makes the Fluxer desktop app open on a self-hosted server instead of the officia
 
 The top of the setup window always shows the status in plain words. If something is wrong, pick **Install** and it is put right.
 
+Each run also writes a log of what it did in the `logs` folder.
+
 ## After a Fluxer update
 
 Every Fluxer update undoes the setup, and Fluxer restarts on the official server. To fix it:

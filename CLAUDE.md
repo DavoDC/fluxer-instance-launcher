@@ -4,6 +4,10 @@ A small PowerShell tool for non-technical Windows users: it makes the official F
 
 How Claude verifies: run `Invoke-Pester tests` and `python -m pytest tests`, then do the dry run and the real apply yourself (`scripts\fluxer-instance-launcher.ps1 apply -DryRun`, then `apply -Yes`, then `status`). Never ask the user to run a dry run or pass arguments; the user only double-clicks the bat.
 
+Logs: every run writes one file `logs/YYYY-MM-DD_HH-MM-SS_<action>.log` at the repo root (gitignored, created on first use) with every line timestamped. Logging is a side channel only (`Write-Log`) and never changes the terminal output or the exit code. Tests pass a sandbox `-LogDir` so they never write the real folder.
+
+The terminal design (menu, status, Install and Uninstall output, bat banner) is locked: change it only with the repo owner's explicit approval in that session.
+
 Rules: `config/config.json` is gitignored and created by the script from an embedded template when missing; `config/config.example.json` is documentation only and no code may read it. No secrets, no network calls, no admin rights, no Fluxer code or logos copied. Keep this repo free of private workspace paths and other people's names. MIT licensed. Private until a scrub is done; publishing is David's decision.
 
 ## Developer reference

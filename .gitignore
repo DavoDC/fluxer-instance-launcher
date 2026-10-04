@@ -1,6 +1,7 @@
 # Local config and logs
 config/config.json
 data/
+logs/
 *.log
 
 # OS
