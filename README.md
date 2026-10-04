@@ -6,7 +6,7 @@ Makes the Fluxer desktop app open on a self-hosted server instead of the officia
 
 ## Set up
 
-1. Install Fluxer as normal.
+1. Install the Fluxer desktop app from [fluxer.app/download](https://fluxer.app/download).
 2. Close Fluxer completely:
    - Right-click its tray icon (bottom right, near the clock).
    - Pick **Quit Fluxer**.
