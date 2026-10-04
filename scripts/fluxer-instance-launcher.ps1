@@ -430,7 +430,11 @@ function Get-WatcherProcesses {
         $all = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'")
     } catch { return @() }
     $pattern = [regex]::Escape($ScriptPath) + '"?\s+watch\b'
-    @($all | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -and $_.CommandLine -match $pattern })
+    $found = @($all | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -and $_.CommandLine -match $pattern })
+    # Sandboxed run (-Root or FLI_TEST_NO_SPAWN=1): only processes that also carry the sandbox root, never the user's real watcher.
+    if ($Root) { return @($found | Where-Object { $_.CommandLine.IndexOf($Root, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 }) }
+    if ($env:FLI_TEST_NO_SPAWN -eq '1') { return @() }
+    $found
 }
 
 function Stop-Watchers {

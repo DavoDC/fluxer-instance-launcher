@@ -763,6 +763,28 @@ Describe 'uninstall stops only the watcher of this script' {
     Remove-Sandbox $sb
 }
 
+Describe 'a sandboxed uninstall never stops a watcher of the real script' {
+    $sb = New-Sandbox
+    Set-WatchConfig $sb $true
+    New-FluxerIcons $sb
+    # decoy carries the REAL script path plus ' watch', like the user's real hidden watcher, but no sandbox root
+    $real = Start-Process powershell.exe -ArgumentList '-NoProfile', '-Command', "Start-Sleep -Seconds 120 # `"$script:Ps1`" watch -DelaySeconds 15" -WindowStyle Hidden -PassThru
+    try {
+        Start-Sleep -Seconds 2
+        $r = Invoke-Launcher $sb 'uninstall'
+        Start-Sleep -Seconds 1
+        It 'leaves the decoy alive' {
+            $real.HasExited | Should Be $false
+        }
+        It 'does not treat it as already running for apply' {
+            Set-WatchConfig $sb $true
+            $r2 = Invoke-Launcher $sb 'apply'
+            (Get-ChildItem $sb.LogDir -Filter '*apply*.log' | Sort-Object LastWriteTime | Select-Object -Last 1 | Get-Content -Raw) | Should Not Match 'already running'
+        }
+    } finally { if (-not $real.HasExited) { Stop-Process -Id $real.Id -Force } }
+    Remove-Sandbox $sb
+}
+
 Describe 'Install and apply start the update helper right away' {
     $sb = New-Sandbox
     New-FluxerIcons $sb
