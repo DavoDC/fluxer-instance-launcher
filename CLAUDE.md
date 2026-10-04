@@ -18,7 +18,7 @@ With no action the script shows the status, then a menu (Install, Uninstall, Qui
 | `apply` | Makes each existing Fluxer icon (Start Menu, Desktop, taskbar) pass `--fluxer-app-url=<server>` (replacing any existing one, keeping other arguments), removes shortcuts an earlier version made, sets the `FluxerInstance` Run value, removes Fluxer's own `Fluxer.Fluxer` Run value. Safe to repeat. |
 | `repair` | Same as `apply`, silent when nothing drifted. Runs 15 seconds after each `launch`. |
 | `status` | Prints a plain summary, then dot points. Exit 0 if all is well, 1 otherwise. |
-| `uninstall` | Takes only the `--fluxer-app-url` argument off the Fluxer icons, removes the Run value and restores the stock `fluxer://` handler if it was patched. |
+| `uninstall` | Takes only the `--fluxer-app-url` argument off the Fluxer icons and removes the Run value. |
 
 Options: `-DryRun` prints instead of changing; `-Yes` skips the menu's confirmation; `-AllowInsecure` permits `http://`; `-ConfigPath`, `-Root` and `-RegistryBase` redirect config, icons and registry writes (the tests use these on a throwaway key and folder). Exit codes: 0 ok, 1 status problem, 2 error, 3 settings file just created (or Fluxer running elsewhere on `launch`).
 
@@ -29,7 +29,6 @@ Settings live in `config/config.json` (gitignored). If it is missing the script 
 | `instance_url` | `https://chat.codered.lol` | The server to open. Must be `https://`. |
 | `autostart` | `true` | Open Fluxer on your instance at login. |
 | `autostart_delay_seconds` | `15` | Wait before the login launch. |
-| `handler_patch` | `false` | Opt in to rewriting the `fluxer://` handler (Fluxer rewrites it back on every launch). |
 | `repair_after_launch_seconds` | `15` | Run `repair` this long after `launch`; `0` turns it off. |
 
 Tests: `Invoke-Pester tests` (Windows PowerShell 5.1, Pester 3) and `python -m pytest tests`. The menu tests feed keys through the `FLI_TEST_KEYS` environment variable.

@@ -2,6 +2,5 @@
   "instance_url": "https://chat.codered.lol",
   "autostart": true,
   "autostart_delay_seconds": 15,
-  "handler_patch": false,
   "repair_after_launch_seconds": 15
 }

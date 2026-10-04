@@ -7,7 +7,7 @@
   Reads config\config.json; if it is missing, creates it from a template built into this script and exits 3.
   No network, no admin rights.
   Writes only: the HKCU Run value FluxerInstance, the --fluxer-app-url argument of Fluxer's own icons
-  (Start Menu, Desktop, taskbar), and (opt-in) the fluxer:// handler. It creates no shortcut of its own.
+  (Start Menu, Desktop, taskbar). It creates no shortcut of its own.
   Test and safety parameters: -Root redirects Desktop, Start Menu, taskbar and LocalAppData into a folder,
   -RegistryBase redirects the registry writes to another key, -DryRun prints instead of changing anything.
 .EXAMPLE
@@ -49,7 +49,6 @@ $DefaultConfigJson = @'
   "instance_url": "https://chat.codered.lol",
   "autostart": true,
   "autostart_delay_seconds": 15,
-  "handler_patch": false,
   "repair_after_launch_seconds": 15
 }
 '@
@@ -74,7 +73,6 @@ function Get-Config {
         Url             = [string](& $get 'instance_url' '')
         Autostart       = [bool](& $get 'autostart' $true)
         AutostartDelay  = [int](& $get 'autostart_delay_seconds' 15)
-        HandlerPatch    = [bool](& $get 'handler_patch' $false)
         RepairAfterSecs = [int](& $get 'repair_after_launch_seconds' 15)
     }
 }
@@ -114,7 +112,6 @@ function Get-Locations {
         Legacy     = @((Join-Path $desk 'Fluxer (my instance).lnk'), (Join-Path $menu 'Fluxer (my instance).lnk'))
         FluxerExe  = $exe
         RunKey     = Join-Path $RegistryBase 'Microsoft\Windows\CurrentVersion\Run'
-        HandlerKey = Join-Path $RegistryBase 'Classes\fluxer\shell\open\command'
     }
 }
 
@@ -181,10 +178,6 @@ function Test-LegacyOwn([string]$Path) {
     ($l.TargetPath -eq $PowerShellExe) -and ($l.Arguments -match 'fluxer-instance-launcher\.ps1')
 }
 
-function Get-HandlerExe([string]$Value) {
-    if ($Value -match '^"([^"]+)"') { $Matches[1] } else { $null }
-}
-
 # ---------- apply / repair ----------
 function Sync-Entries($cfg, $loc, [bool]$Quiet) {
     $changed = 0
@@ -227,23 +220,6 @@ function Sync-Entries($cfg, $loc, [bool]$Quiet) {
     foreach ($old in $loc.Legacy) {
         if (Test-LegacyOwn $old) {
             Invoke-Change "delete the old launcher shortcut $old" { Remove-Item -Path $old -Force }
-            $script:ChangeCount++
-        }
-    }
-
-    # 4. fluxer:// handler: opt-in only
-    $hNow = Get-RegValue $loc.HandlerKey '(default)'
-    if ($null -ne $hNow) {
-        $exe = Get-HandlerExe $hNow
-        if ($cfg.HandlerPatch -and $exe) {
-            $want = '"{0}" --fluxer-app-url={1} "%1"' -f $exe, $cfg.Url
-            if ($hNow -ne $want) {
-                Invoke-Change 'patch the fluxer:// handler (opt-in)' { Set-ItemProperty -Path $loc.HandlerKey -Name '(default)' -Value $want }
-                $script:ChangeCount++
-            }
-        } elseif ($exe -and $hNow -match '--fluxer-app-url=') {
-            $stock = '"{0}" "%1"' -f $exe
-            Invoke-Change 'restore the stock fluxer:// handler' { Set-ItemProperty -Path $loc.HandlerKey -Name '(default)' -Value $stock }
             $script:ChangeCount++
         }
     }
@@ -300,11 +276,6 @@ function Show-StatusPlain($cfg, $loc) {
     if ($null -eq (Get-RegValue $loc.RunKey $FluxerRunValueName)) { Add-Line 'good' "Fluxer's own sign-in start: off, so it will not open on the official server." }
     else { Add-Line 'bad' "Fluxer's own sign-in start: on, so Fluxer will open on the official server when you sign in to Windows." }
 
-    if ($cfg.HandlerPatch) {
-        $hNow = Get-RegValue $loc.HandlerKey '(default)'
-        if ($null -ne $hNow -and $hNow -notmatch [regex]::Escape("--fluxer-app-url=$($cfg.Url)")) { Add-Line 'bad' 'fluxer:// links: do not use your server.' }
-        else { Add-Line 'good' 'fluxer:// links: open on your server.' }
-    }
     if (@($loc.Legacy | Where-Object { Test-LegacyOwn $_ }).Count -gt 0) { Add-Line 'bad' 'Old shortcut made by an earlier version of this setup: still there.' }
 
     $bad = $script:statusBad
@@ -382,12 +353,6 @@ function Remove-Entries($cfg, $loc) {
     }
     foreach ($old in $loc.Legacy) {
         if (Test-LegacyOwn $old) { Invoke-Change "delete the old launcher shortcut $old" { Remove-Item -Path $old -Force } }
-    }
-    $hNow = Get-RegValue $loc.HandlerKey '(default)'
-    $exe = if ($hNow) { Get-HandlerExe $hNow } else { $null }
-    if ($exe -and $hNow -match '--fluxer-app-url=') {
-        $stock = '"{0}" "%1"' -f $exe
-        Invoke-Change 'restore the stock fluxer:// handler' { Set-ItemProperty -Path $loc.HandlerKey -Name '(default)' -Value $stock }
     }
     Write-Host 'Uninstall done. Fluxer and its icons are still there and open the official server again; turn its own autostart on in its settings if you want it.'
 }
@@ -469,7 +434,6 @@ function Invoke-Menu($cfg, $loc) {
             Write-Host "  - turn off Fluxer's own sign-in start, so it does not open the official server"
             if (@(Get-FluxerNotOnServer $cfg $loc).Count -gt 0) { Write-Host '  - close Fluxer, which is open on another server, so it opens on yours next time' }
             if (@($loc.Legacy | Where-Object { Test-LegacyOwn $_ }).Count -gt 0) { Write-Host '  - delete the old shortcut an earlier version of this setup made' }
-            if ($cfg.HandlerPatch) { Write-Host '  - make fluxer:// links open on your server' }
             Write-Host 'It needs no administrator rights, creates no scheduled tasks, and Uninstall undoes it all.'
             Write-Host ''
             if (-not (Confirm-Yes 'Go ahead?')) { Write-Host 'Cancelled. Nothing was changed.'; return 0 }

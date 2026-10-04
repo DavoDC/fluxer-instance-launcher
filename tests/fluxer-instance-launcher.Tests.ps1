@@ -33,8 +33,8 @@ function Remove-Sandbox($sb) {
     Remove-Item -Recurse -Force $sb.Reg -ErrorAction SilentlyContinue
 }
 
-function Set-TestConfig($sb, $url = 'https://chat.example.com', $autostart = $true, $handler = $false) {
-    $cfg = [ordered]@{ instance_url = $url; autostart = $autostart; autostart_delay_seconds = 15; handler_patch = $handler }
+function Set-TestConfig($sb, $url = 'https://chat.example.com', $autostart = $true) {
+    $cfg = [ordered]@{ instance_url = $url; autostart = $autostart; autostart_delay_seconds = 15 }
     ($cfg | ConvertTo-Json) | Set-Content -Path $sb.Config -Encoding UTF8
 }
 
@@ -64,16 +64,6 @@ function Get-RunValue($sb, $name) {
     $k = Join-Path $sb.Reg 'Microsoft\Windows\CurrentVersion\Run'
     if (-not (Test-Path $k)) { return $null }
     (Get-ItemProperty -Path $k -Name $name -ErrorAction SilentlyContinue).$name
-}
-function Get-HandlerValue($sb) {
-    $k = Join-Path $sb.Reg 'Classes\fluxer\shell\open\command'
-    if (-not (Test-Path $k)) { return $null }
-    (Get-ItemProperty -Path $k).'(default)'
-}
-function Set-StockHandler($sb) {
-    $k = Join-Path $sb.Reg 'Classes\fluxer\shell\open\command'
-    New-Item -Path $k -Force | Out-Null
-    Set-ItemProperty -Path $k -Name '(default)' -Value '"C:\FakeFluxer\Fluxer.exe" "%1"'
 }
 function Get-LnkArgs($path) {
     $l = (New-Object -ComObject WScript.Shell).CreateShortcut($path)
@@ -113,9 +103,6 @@ Describe 'fluxer-instance-launcher apply' {
     It 'creates no shortcut of its own' {
         Get-LauncherLnkCount $sb | Should Be 0
         @(Get-ChildItem $sb.Dir -Recurse -Filter *.lnk).Count | Should Be 3
-    }
-    It 'does not touch the fluxer:// handler when handler_patch is false' {
-        Get-HandlerValue $sb | Should BeNullOrEmpty
     }
     Remove-Sandbox $sb
 }
@@ -227,23 +214,6 @@ Describe 'autostart disabled in config' {
     Invoke-Launcher $sb 'apply' | Out-Null
     It 'writes no FluxerInstance Run value' {
         Get-RunValue $sb 'FluxerInstance' | Should BeNullOrEmpty
-    }
-    Remove-Sandbox $sb
-}
-
-Describe 'handler patch is opt-in' {
-    $sb = New-Sandbox
-    Set-TestConfig $sb 'https://chat.example.com' $true $true
-    Set-StockHandler $sb
-    Invoke-Launcher $sb 'apply' | Out-Null
-    It 'adds the flag and keeps "%1" quoted when enabled' {
-        $h = Get-HandlerValue $sb
-        $h | Should Match '--fluxer-app-url=https://chat\.example\.com'
-        $h | Should Match '"%1"$'
-    }
-    It 'uninstall restores the stock handler' {
-        Invoke-Launcher $sb 'uninstall' | Out-Null
-        Get-HandlerValue $sb | Should Be '"C:\FakeFluxer\Fluxer.exe" "%1"'
     }
     Remove-Sandbox $sb
 }
@@ -393,7 +363,6 @@ Describe 'missing config is created from the embedded template, never from the e
         $c.instance_url | Should Be 'https://chat.codered.lol'
         $c.autostart | Should Be $true
         $c.autostart_delay_seconds | Should Be 15
-        $c.handler_patch | Should Be $false
     }
     It 'changes nothing else on that first run' {
         Get-RunValue $sb 'FluxerInstance' | Should BeNullOrEmpty
