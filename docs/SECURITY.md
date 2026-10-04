@@ -22,4 +22,4 @@ Fluxer's developers have said that a built-in "connect to any server" button wou
 
 ## After a Fluxer update
 
-Fluxer updates itself from its own update server, which the server you connect to has no part in. After an update, run `Fluxer Instance Setup.bat` and pick Install again, then open Fluxer from its normal icon. Until you do, Fluxer may open on the official server instead.
+Fluxer updates itself from its own update server, which the server you connect to has no part in. The update replaces Fluxer's icons and restarts Fluxer on the official server, so after every update run `Fluxer Instance Setup.bat`, pick Install again, then open Fluxer from its normal icon. The setup status at the top tells you when this is needed. Nothing is lost: your account and messages live on the server you chose.

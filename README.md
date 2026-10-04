@@ -14,7 +14,7 @@ To remove everything, double-click `Fluxer Instance Setup.bat` and pick **Uninst
 
 The setup window shows the current status at the top in plain words: what is in place and what is not. If something looks wrong, pick **Install** and it puts it right.
 
-After a Fluxer update, if Fluxer opens on the official server, close it, run `Fluxer Instance Setup.bat` and pick **Install** again.
+**After every Fluxer update you must run setup again.** Tested 2026-10-04: the update replaced the Start Menu and taskbar icons, and Fluxer then restarted itself on the official server (not yours). To fix it, close Fluxer fully (right-click its tray icon, Quit Fluxer), double-click `Fluxer Instance Setup.bat`, pick **Install**, then open Fluxer from its normal icon. The status at the top of the setup window tells you if it is needed.
 
 ## For developers
 
@@ -44,7 +44,7 @@ Settings live in `config/config.json` (gitignored). If it is missing the script 
 
 Tests: `Invoke-Pester tests` (Windows PowerShell 5.1, Pester 3) and `python -m pytest tests`. The menu tests feed keys through the `FLI_TEST_KEYS` environment variable.
 
-Still to do: a real before and after Fluxer update test (apply, status, reboot, let Fluxer update, status again, and record which icons kept the argument; the updater may recreate them). Old settings files that still contain `shortcut_name` keep working; the key is ignored.
+Update test result (2026-10-04, build 2026.1003.155758): after Fluxer's in-app update, the Start Menu and taskbar icons had lost `--fluxer-app-url` (the updater recreates them), status reported both as opening the official server, and the app auto-restarted on the official server. So an update always needs a re-Install; an automatic re-apply is a backlog item. Old settings files that still contain `shortcut_name` keep working; the key is ignored.
 
 ## Licence
 
