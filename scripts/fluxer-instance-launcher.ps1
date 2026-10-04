@@ -122,7 +122,10 @@ function Get-Locations {
 function Invoke-Change([string]$Description, [scriptblock]$Do) {
     if ($DryRun) { Write-Host "[dry-run] would: $Description"; return }
     & $Do
-    Write-Host "[changed] $Description"
+    if ($Description -match '^(.*) \((\w:\.*)\)$') {
+        Write-Host "  - $($Matches[1])"
+        Write-Host "      $($Matches[2])" -ForegroundColor DarkGray
+    } else { Write-Host "  - $Description" }
 }
 
 function Get-RegValue([string]$Key, [string]$Name) {
@@ -457,7 +460,10 @@ function Invoke-Menu($cfg, $loc) {
             Write-Host 'It needs no administrator rights, creates no scheduled tasks, and Uninstall undoes it all.'
             Write-Host ''
             if (-not (Confirm-Yes 'Go ahead?')) { Write-Host 'Cancelled. Nothing was changed.'; return 0 }
+            Write-Host ''
+            Write-Host 'Changes made:'
             Sync-Entries $cfg $loc $false
+            Write-Host ''
             Write-Host 'Done. Open Fluxer from its normal Start Menu, Desktop or taskbar icon.'
             return 0
         }
