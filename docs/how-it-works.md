@@ -109,6 +109,5 @@ An earlier version made a custom-named shortcut. It was dropped: patching Fluxer
 - Every Fluxer update undoes the icon patch and restarts Fluxer on the official server. Without the watcher, run Install again; the status at the top of the menu tells you.
 - The watcher's behaviour against a real Velopack rewrite is unverified; it is covered by tests that simulate the change, not by a live update.
 - Whether Fluxer's own sign-in value was on before Install cannot be known if Install ran before state saving existed; in that case Uninstall leaves it as it is and invents nothing.
-- Two early commits of this repo hold Python cache files that embed the author's Windows home path. This is known and accepted.
 - Windows only. The tool needs Windows PowerShell 5.1, which ships with Windows 10 and 11. No administrator rights are needed.
 - Not tested: whether a crafted `fluxer://` link can inject extra launch options while Fluxer is closed. That would affect every Fluxer user with or without this tool, which is why the tool does not touch the handler.
