@@ -6,3 +6,7 @@ data/
 # OS
 Thumbs.db
 desktop.ini
+
+# Python test caches
+__pycache__/
+.pytest_cache/
