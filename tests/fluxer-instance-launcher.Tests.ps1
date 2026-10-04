@@ -937,3 +937,34 @@ Describe 'status wording for Fluxer own sign-in start' {
     }
     Remove-Sandbox $sb
 }
+
+Describe 'the started helper does not open Fluxer, the sign-in Run value does' {
+    $sb = New-Sandbox
+    New-FluxerIcons $sb
+    function Get-LastLog2($sb) { Get-Content -Raw (Get-ChildItem $sb.LogDir -Filter '*.log' | Sort-Object LastWriteTime, Name | Select-Object -Last 1).FullName }
+    It 'Start-WatcherNow passes -NoLaunch to the helper it starts' {
+        Set-WatchConfig $sb $true
+        [void](Invoke-Launcher $sb 'apply')
+        (Get-LastLog2 $sb) | Should Match 'would start watcher.*\bwatch -NoLaunch\b'
+    }
+    It 'the sign-in Run value form has no -NoLaunch' {
+        $v = Get-RunValue $sb 'FluxerInstance'
+        $v | Should Match ' watch -DelaySeconds \d+$'
+        $v | Should Not Match 'NoLaunch'
+    }
+    It 'watch -NoLaunch does not open Fluxer at start' {
+        $env:FLI_TEST_WATCH_ONCE = '2'
+        try { $r = Invoke-Launcher $sb 'watch' @('-NoLaunch') } finally { Remove-Item Env:\FLI_TEST_WATCH_ONCE -ErrorAction SilentlyContinue }
+        $r.Code | Should Be 0
+        (Get-LastLog2 $sb) | Should Match 'not opening Fluxer at start'
+        (Get-LastLog2 $sb) | Should Not Match 'would open Fluxer'
+    }
+    It 'plain watch still opens Fluxer at start' {
+        $env:FLI_TEST_WATCH_ONCE = '2'
+        try { $r = Invoke-Launcher $sb 'watch' } finally { Remove-Item Env:\FLI_TEST_WATCH_ONCE -ErrorAction SilentlyContinue }
+        $r.Code | Should Be 0
+        (Get-LastLog2 $sb) | Should Match 'would open Fluxer at start'
+        (Get-LastLog2 $sb) | Should Not Match 'not opening Fluxer'
+    }
+    Remove-Sandbox $sb
+}

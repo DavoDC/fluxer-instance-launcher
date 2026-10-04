@@ -29,6 +29,7 @@ param(
     [switch]$DryRun,
     [switch]$AllowInsecure,
     [switch]$ForceRestart,
+    [switch]$NoLaunch,
     [switch]$Yes
 )
 
@@ -478,9 +479,9 @@ function Start-WatcherNow($cfg) {
     if (-not $cfg.WatchUpdates) { Write-Log 'watcher: watch_updates is off, not starting the helper'; return }
     $running = @(Get-WatcherProcesses)
     if ($running.Count -gt 0) { Write-Log "watcher: already running (PID $($running[0].ProcessId)), not starting another"; return }
-    $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', ('"{0}"' -f $ScriptPath), 'watch', '-DelaySeconds', [string]$cfg.AutostartDelay)
+    $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', ('"{0}"' -f $ScriptPath), 'watch', '-NoLaunch', '-DelaySeconds', [string]$cfg.AutostartDelay)
     Invoke-Change 'start the background update helper' {
-        if ($env:FLI_TEST_NO_SPAWN -eq '1') { Write-Log 'watcher: would start watcher (FLI_TEST_NO_SPAWN=1)' }
+        if ($env:FLI_TEST_NO_SPAWN -eq '1') { Write-Log "watcher: would start watcher (FLI_TEST_NO_SPAWN=1): $PowerShellExe $($argList -join ' ')" }
         else { Start-Process -FilePath $PowerShellExe -ArgumentList $argList -WindowStyle Hidden; Write-Log "watcher: started: $PowerShellExe $($argList -join ' ')" }
     } 'started the background update helper'
 }
@@ -509,7 +510,8 @@ function Watch-Icons($cfg, $loc) {
             $watchers += $w
             $n++
         }
-        if ($once -gt 0) { Write-Log 'watch: test hook, first launch skipped' }
+        if ($NoLaunch) { Write-Log 'watch: -NoLaunch, not opening Fluxer at start'; $script:DelaySeconds = 0; $DelaySeconds = 0 }
+        elseif ($once -gt 0) { Write-Log 'watch: test hook, would open Fluxer at start (skipped)' }
         else { [void](Start-Fluxer $cfg $loc); $script:DelaySeconds = 0; $DelaySeconds = 0 }
         while ($true) {
             Write-Log 'watch: waiting for an icon change'
