@@ -579,3 +579,16 @@ Describe 'logging failure never breaks a run' {
     }
     Remove-Sandbox $sb
 }
+
+Describe 'menu log does not repeat an unchanged status' {
+    $sb = New-Sandbox
+    Set-TestConfig $sb
+    New-FluxerIcons $sb
+    [void](Invoke-Menu $sb 'Down,Up,Down,Up,Esc')
+    $log = Get-Content -Raw (Get-ChildItem $sb.LogDir -Filter '*_menu.log')[0].FullName
+    It 'logs each status line once however many keys were pressed' {
+        ([regex]::Matches($log, 'status \(\w+\): Start Menu icon')).Count | Should Be 1
+    }
+    It 'still logs the menu choice' { $log | Should Match 'menu: choice Quit' }
+    Remove-Sandbox $sb
+}

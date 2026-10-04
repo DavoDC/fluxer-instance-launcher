@@ -299,10 +299,11 @@ function Show-StatusPlain($cfg, $loc) {
     }
     # Every thing this tool touches gets a line: kind is good, bad or note.
     $lines = New-Object System.Collections.Generic.List[object]
+    $logBuf = New-Object System.Collections.Generic.List[string]
     $bad = 0
     function Add-Line([string]$kind, [string]$text) {
         $lines.Add([pscustomobject]@{ Kind = $kind; Text = $text })
-        Write-Log "status ($kind): $text"
+        $logBuf.Add("status ($kind): $text")
         if ($kind -eq 'bad') { $script:statusBad++ }
     }
     $script:statusBad = 0
@@ -336,6 +337,9 @@ function Show-StatusPlain($cfg, $loc) {
     if (@($loc.Legacy | Where-Object { Test-LegacyOwn $_ }).Count -gt 0) { Add-Line 'bad' 'Old shortcut made by an earlier version of this setup: still there.' }
 
     $bad = $script:statusBad
+    # The menu redraws the status on every key press; log it only when it differs from the last one logged.
+    $block = $logBuf -join "`n"
+    if ($block -ne $script:LastStatusLogged) { foreach ($entry in $logBuf) { Write-Log $entry }; $script:LastStatusLogged = $block }
     if ($bad -eq 0) { Write-Host "Everything is working. Fluxer opens on your self-hosted server ($($cfg.Url))." -ForegroundColor Green }
     else { Write-Host 'Something needs fixing. Pick Install and it will be put right.' -ForegroundColor Red }
     foreach ($l in $lines) {
