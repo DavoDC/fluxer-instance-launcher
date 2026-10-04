@@ -443,6 +443,19 @@ function Stop-Watchers {
     }
 }
 
+# After Install/apply: with watch_updates on, start the helper now (the Run value only starts it at the next sign-in).
+# Never when one for this script already runs. FLI_TEST_NO_SPAWN=1 is the test seam: log instead of starting a process.
+function Start-WatcherNow($cfg) {
+    if (-not $cfg.WatchUpdates) { Write-Log 'watcher: watch_updates is off, not starting the helper'; return }
+    $running = @(Get-WatcherProcesses)
+    if ($running.Count -gt 0) { Write-Log "watcher: already running (PID $($running[0].ProcessId)), not starting another"; return }
+    $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', ('"{0}"' -f $ScriptPath), 'watch', '-DelaySeconds', [string]$cfg.AutostartDelay)
+    Invoke-Change 'start the background update helper' {
+        if ($env:FLI_TEST_NO_SPAWN -eq '1') { Write-Log 'watcher: would start watcher (FLI_TEST_NO_SPAWN=1)' }
+        else { Start-Process -FilePath $PowerShellExe -ArgumentList $argList -WindowStyle Hidden; Write-Log "watcher: started: $PowerShellExe $($argList -join ' ')" }
+    } 'started the background update helper'
+}
+
 function Watch-Icons($cfg, $loc) {
     $once = 0
     if ($env:FLI_TEST_WATCH_ONCE) { [void][int]::TryParse($env:FLI_TEST_WATCH_ONCE, [ref]$once) }
@@ -609,6 +622,7 @@ function Invoke-Menu($cfg, $loc) {
             if ($saveWatch) { $want = $cfg.WatchUpdates; Invoke-Change 'save the update watcher choice in your settings file' { Save-WatchChoice $want } "saved your update choice ($([System.IO.Path]::GetFullPath($ConfigPath)))" }
             Sync-Entries $cfg $loc $false
             Stop-FluxerNotOnServer $cfg $loc
+            Start-WatcherNow $cfg
             Write-Host ''
             Write-Host 'Done. Open Fluxer from its normal Start Menu or taskbar icon.'
             return 0
@@ -649,7 +663,7 @@ if ($Action -eq '') {
     Exit-Run $code
 }
 switch ($Action) {
-    'apply'     { Sync-Entries $cfg $loc $false }
+    'apply'     { Sync-Entries $cfg $loc $false; Start-WatcherNow $cfg }
     'repair'    { Sync-Entries $cfg $loc $true }
     'status'    { $code = if ((Show-StatusPlain $cfg $loc) -gt 0) { 1 } else { 0 } }
     'uninstall' { Remove-Entries $cfg $loc }

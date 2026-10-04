@@ -8,7 +8,7 @@ Yes. The launcher is small, does one job, and leaves Fluxer itself untouched. It
 - It needs no administrator rights.
 - It makes no network connections.
 - It never reads or stores your passwords or tokens.
-- It installs no service. The update watcher is optional and off by default. If you turn it on, one small hidden helper runs while you are signed in. It sits idle, makes no network connections and changes only Fluxer's own icons.
+- It installs no service. The update watcher is optional and off by default. If you turn it on, one small hidden helper runs while you are signed in. It sits idle, makes no network connections and changes only Fluxer's own icons. It also closes Fluxer when it is open on the wrong server and reopens it on yours.
 - It changes only the server setting on Fluxer's own icons (Start Menu, Desktop, taskbar) and adds one start-at-login entry named after the launcher. It creates no shortcut of its own. Pick Uninstall in the setup menu and it takes the setting off the icons and removes the entry.
 - Its status check shows every item it manages, so you can see exactly what is in place.
 

@@ -8,7 +8,7 @@ Logs: every run writes one file `logs/YYYY-MM-DD_HH-MM-SS_<action>.log` at the r
 
 The terminal design (menu, status, Install and Uninstall output, bat banner) is locked: change it only with the repo owner's explicit approval in that session.
 
-Rules: `config/config.json` is gitignored and created by the script from an embedded template when missing; `config/config.example.json` is documentation only and no code may read it. No secrets, no network calls, no admin rights, no Fluxer code or logos copied. Keep this repo free of private workspace paths and other people's names. MIT licensed. Private until a scrub is done; publishing is David's decision.
+Rules: `config/config.json` is gitignored and created by the script from an embedded template when missing; `config/config.example.json` is documentation only and no code may read it. No secrets, no network calls, no admin rights, no Fluxer code or logos copied. Keep this repo free of private workspace paths and other people's names. MIT licensed.
 
 ## Developer reference
 
@@ -35,7 +35,7 @@ Settings live in `config/config.json` (gitignored). If it is missing the script 
 | `autostart` | `true` | Open Fluxer on your instance at login. |
 | `autostart_delay_seconds` | `15` | Wait before the login launch. |
 | `repair_after_launch_seconds` | `15` | Run `repair` this long after `launch`; `0` turns it off. |
-| `watch_updates` | `false` | When true the sign-in Run value runs `watch` (hidden) instead of `launch`. The menu Install asks once (not with `-Yes` or `apply`) and saves the answer here. Uninstall also stops a running watcher of this script. |
+| `watch_updates` | `false` | When true the sign-in Run value runs `watch` (hidden) instead of `launch`. The menu Install asks once (not with `-Yes` or `apply`) and saves the answer here. Uninstall also stops a running watcher of this script. Install and `apply` also start the watcher right away (hidden) when this is true and none of this script is running; env `FLI_TEST_NO_SPAWN=1` logs `would start watcher` instead of starting it. |
 
 Tests: `Invoke-Pester tests` (Windows PowerShell 5.1, Pester 3) and `python -m pytest tests`. The menu tests feed keys through the `FLI_TEST_KEYS` environment variable.
 

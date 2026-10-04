@@ -4,6 +4,9 @@
 # so the real registry, Start Menu, Desktop and taskbar are never touched.
 # The sandbox mirrors Fluxer's three icon locations: Desktop\Fluxer.lnk, StartMenu\Fluxer Platform AB\Fluxer.lnk, Taskbar\Fluxer.lnk.
 
+# Test seam: no test may start a real update helper process.
+$env:FLI_TEST_NO_SPAWN = '1'
+
 $repo = Split-Path -Parent $PSScriptRoot
 $script:Ps1 = Join-Path $repo 'scripts\fluxer-instance-launcher.ps1'
 $script:Bat = Join-Path $repo 'scripts\Fluxer Instance Setup.bat'
@@ -752,5 +755,50 @@ Describe 'uninstall stops only the watcher of this script' {
     }
     if (-not $other.HasExited) { Stop-Process -Id $other.Id -Force }
     if (-not $mine.HasExited) { Stop-Process -Id $mine.Id -Force }
+    Remove-Sandbox $sb
+}
+
+Describe 'Install and apply start the update helper right away' {
+    $sb = New-Sandbox
+    New-FluxerIcons $sb
+    $copy = Join-Path $sb.Dir 'copy\fluxer-instance-launcher.ps1'
+    New-Item -ItemType Directory -Path (Split-Path -Parent $copy) -Force | Out-Null
+    Copy-Item $script:Ps1 $copy
+    function Get-LastLog($sb) { Get-Content -Raw (Get-ChildItem $sb.LogDir -Filter '*.log' | Sort-Object LastWriteTime, Name | Select-Object -Last 1).FullName }
+    It 'is attempted by apply when watch_updates is on' {
+        Set-WatchConfig $sb $true
+        $r = Invoke-Launcher $sb 'apply'
+        $r.Out | Should Match 'started the background update helper'
+        (Get-LastLog $sb) | Should Match 'would start watcher'
+    }
+    It 'is attempted by the menu Install when the question is answered yes' {
+        Set-WatchConfig $sb $null
+        $r = Invoke-Menu $sb 'Enter,Y,Y'
+        $r.Out | Should Match 'started the background update helper'
+    }
+    It 'is not attempted when watch_updates is off' {
+        Set-WatchConfig $sb $false
+        $r = Invoke-Launcher $sb 'apply'
+        $r.Out | Should Not Match 'background update helper'
+        (Get-LastLog $sb) | Should Not Match 'would start watcher'
+        $r = Invoke-Menu $sb 'Enter,Y,N'
+        $r.Out | Should Not Match 'background update helper'
+    }
+    It 'is not attempted under -DryRun' {
+        Set-WatchConfig $sb $true
+        $r = Invoke-Launcher $sb 'apply' @('-DryRun')
+        $r.Out | Should Not Match 'started the background update helper'
+        (Get-LastLog $sb) | Should Not Match 'would start watcher'
+    }
+    It 'is not attempted when a helper for this script already runs' {
+        $mine = Start-Process powershell.exe -ArgumentList '-NoProfile', '-Command', "Start-Sleep -Seconds 120 # $copy watch" -WindowStyle Hidden -PassThru
+        Start-Sleep -Seconds 2
+        try {
+            Set-WatchConfig $sb $true
+            $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $copy apply -ConfigPath $sb.Config -Root $sb.Dir -RegistryBase $sb.Reg -FluxerExe $sb.Exe -LogDir $sb.LogDir 2>&1 | Out-String
+            $out | Should Not Match 'started the background update helper'
+            (Get-LastLog $sb) | Should Match 'already running'
+        } finally { if (-not $mine.HasExited) { Stop-Process -Id $mine.Id -Force } }
+    }
     Remove-Sandbox $sb
 }
