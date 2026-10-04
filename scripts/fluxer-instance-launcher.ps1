@@ -116,13 +116,14 @@ function Get-Locations {
 }
 
 # ---------- helpers ----------
-function Invoke-Change([string]$Description, [scriptblock]$Do) {
+function Invoke-Change([string]$Description, [scriptblock]$Do, [string]$Done = '') {
     if ($DryRun) { Write-Host "[dry-run] would: $Description"; return }
     & $Do
-    if ($Description -match '^(.*) \((\w:\\.*)\)$') {
+    $text = if ($Done) { $Done } else { $Description }
+    if ($text -match '^(.*) \((\w:\\.*)\)$') {
         Write-Host "  - $($Matches[1])"
         Write-Host "      $($Matches[2])" -ForegroundColor DarkGray
-    } else { Write-Host "  - $Description" }
+    } else { Write-Host "  - $text" }
 }
 
 function Get-RegValue([string]$Key, [string]$Name) {
@@ -339,8 +340,10 @@ function Start-Fluxer($cfg, $loc) {
 
 # ---------- uninstall ----------
 function Remove-Entries($cfg, $loc) {
+    Write-Host ''
+    Write-Host 'Uninstall done:'
     if ($null -ne (Get-RegValue $loc.RunKey $RunValueName)) {
-        Invoke-Change "remove Run value $RunValueName" { Remove-ItemProperty -Path $loc.RunKey -Name $RunValueName }
+        Invoke-Change "remove Run value $RunValueName" { Remove-ItemProperty -Path $loc.RunKey -Name $RunValueName } 'removed the sign-in start'
     }
     foreach ($icon in $loc.Icons) {
         if (-not (Test-Path $icon.Path)) { continue }
@@ -348,13 +351,14 @@ function Remove-Entries($cfg, $loc) {
         if ((Get-FlagState $cur $cfg.Url) -ne 'official' -or $cur -match '--fluxer-app-url=') {
             $want = Set-UrlFlag $cur ''
             $lnkPath = $icon.Path
-            Invoke-Change "take the server address off the $($icon.Name) Fluxer icon ($lnkPath)" { Set-LnkArguments $lnkPath $want }
+            Invoke-Change "take the server address off the $($icon.Name) Fluxer icon ($lnkPath)" { Set-LnkArguments $lnkPath $want } "took your server off the $($icon.Name) icon ($lnkPath)"
         }
     }
     foreach ($old in $loc.Legacy) {
-        if (Test-LegacyOwn $old) { Invoke-Change "delete the old launcher shortcut $old" { Remove-Item -Path $old -Force } }
+        if (Test-LegacyOwn $old) { Invoke-Change "delete the old launcher shortcut $old" { Remove-Item -Path $old -Force } "deleted the old shortcut ($old)" }
     }
-    Write-Host 'Uninstall done. Fluxer and its icons are still there and open the official server again; turn its own autostart on in its settings if you want it.'
+    Write-Host ''
+    Write-Host 'Fluxer is untouched and opens the official server again.'
 }
 
 # ---------- menu (for people; scripts and tests pass an action instead) ----------
@@ -446,7 +450,8 @@ function Invoke-Menu($cfg, $loc) {
             return 0
         }
         'Uninstall' {
-            Write-Host 'Uninstall takes your server off the Fluxer icons and removes the sign-in entry this tool made. Fluxer itself is not touched.'
+            Write-Host 'Uninstall takes your server off the Fluxer icons and removes the sign-in start this tool made. Fluxer itself is not touched.'
+            Write-Host ''
             if (-not (Confirm-Yes 'Go ahead?')) { Write-Host 'Cancelled. Nothing was changed.'; return 0 }
             Remove-Entries $cfg $loc
             return 0
