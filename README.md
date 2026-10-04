@@ -46,3 +46,10 @@ Double-click `Fluxer Instance Setup.bat` and pick **Uninstall**. Fluxer itself i
 ## Licence
 
 [MIT](LICENSE). The launcher copies no Fluxer code, binaries or logos.
+
+## More
+
+- [How it works](docs/how-it-works.md): the launch flag, exactly what Install changes and how Uninstall reverses it, the update watcher.
+- [Design decisions](docs/design-decisions.md): choices, rejected alternatives and similar tools.
+- [Development](docs/development.md): running the tests and the engineering rules.
+- [Security](docs/SECURITY.md): is it safe to use.

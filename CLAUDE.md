@@ -14,7 +14,9 @@ Rules: `config/config.json` is gitignored and created by the script from an embe
 
 ## Developer reference
 
-PowerShell 5.1 script `scripts/fluxer-instance-launcher.ps1`, started by the thin `scripts/Fluxer Instance Setup.bat`. Fluxer has no instance picker; the only way is the launch flag `--fluxer-app-url=<instance>`, which it never saves. Similar tools exist (`omgitsyasir/fluxer-desktop-instance-swapper`, `gogy-no-one/gogys-fluxer`, `nfb04/fluxer-desktop-app-multi-instance`); this one keeps the unmodified official app and focuses on surviving updates.
+PowerShell 5.1 script `scripts/fluxer-instance-launcher.ps1`, started by the thin `scripts/Fluxer Instance Setup.bat`. Fluxer has no instance picker; the only way is the launch flag `--fluxer-app-url=<instance>`, which it never saves. Similar tools exist (see `docs/design-decisions.md`); this one keeps the unmodified official app and focuses on surviving updates.
+
+Key docs: `docs/how-it-works.md` (flag, Fluxer's own behaviour, every change Install makes and its Uninstall, watcher, limits), `docs/design-decisions.md` (choices and rejected alternatives), `docs/development.md` (tests, seams, engineering rules), `docs/SECURITY.md` (trust).
 
 With no action the script shows the status, then a menu (Install, Uninstall, Quit). With an action it runs without any menu, which is what tests and Claude use:
 
