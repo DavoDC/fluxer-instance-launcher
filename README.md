@@ -2,7 +2,11 @@
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/G2G31WKOCN)
 
-Makes the Fluxer desktop app open on a self-hosted server instead of the official one, and keeps it that way. Windows only. Unofficial, not affiliated with the Fluxer project. Is it safe? See [SECURITY.md](docs/SECURITY.md).
+Makes the Fluxer desktop app open on a self-hosted server instead of the official one, and keeps it that way.
+
+- Windows only.
+- Unofficial, not affiliated with the Fluxer project.
+- Is it safe? See [SECURITY.md](docs/SECURITY.md).
 
 ## Set up
 
@@ -23,9 +27,9 @@ Makes the Fluxer desktop app open on a self-hosted server instead of the officia
 
 ## Check it
 
-The top of the setup window always shows the status in plain words. If something is wrong, pick **Install** and it is put right.
-
-Each run also writes a log of what it did in the `logs` folder.
+- The top of the setup window always shows the status in plain words.
+- If something is wrong, pick **Install** and it is put right.
+- Each run writes a log of what it did in the `logs` folder.
 
 ## After a Fluxer update
 
