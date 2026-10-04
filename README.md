@@ -7,7 +7,7 @@ Makes the Fluxer desktop app open on a self-hosted server instead of the officia
 ## Set up
 
 1. Install the Fluxer desktop app from [fluxer.app/download](https://fluxer.app/download).
-2. Close Fluxer completely: right-click its tray icon (near the clock) and pick **Quit Fluxer**.
+2. Close Fluxer completely: right-click its tray icon and pick **Quit Fluxer**.
 3. Download or clone this repo.
 4. Open the `scripts` folder and double-click `Fluxer Instance Setup.bat`.
 5. The first time, it makes a settings file and shows where it is:
