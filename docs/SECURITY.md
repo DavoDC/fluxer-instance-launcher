@@ -9,7 +9,7 @@ Yes. The launcher is small, does one job, and leaves Fluxer itself untouched. It
 - It makes no network connections.
 - It never reads or stores your passwords or tokens.
 - It installs no background service.
-- It adds only a shortcut and a start-at-login entry, both named after the launcher. Pick Uninstall in the setup menu and they are gone.
+- It changes only the server setting on Fluxer's own icons (Start Menu, Desktop, taskbar) and adds one start-at-login entry named after the launcher. It creates no shortcut of its own. Pick Uninstall in the setup menu and it takes the setting off the icons and removes the entry.
 - Its status check shows every item it manages, so you can see exactly what is in place.
 
 ## You choose the server
@@ -22,4 +22,4 @@ Fluxer's developers have said that a built-in "connect to any server" button wou
 
 ## After a Fluxer update
 
-Fluxer updates itself from its own update server, which the server you connect to has no part in. After an update, run `Fluxer Instance Setup.bat` and pick Install again, then open Fluxer from the launcher's shortcut. Until you do, Fluxer will open on the official server instead.
+Fluxer updates itself from its own update server, which the server you connect to has no part in. After an update, run `Fluxer Instance Setup.bat` and pick Install again, then open Fluxer from its normal icon. Until you do, Fluxer may open on the official server instead.

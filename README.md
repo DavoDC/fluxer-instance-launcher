@@ -8,13 +8,13 @@ Makes the Fluxer desktop app open on a self-hosted server instead of the officia
 
 1. Install Fluxer as normal, then close it completely (the tray icon too).
 2. Double-click `Fluxer Instance Setup.bat` (in the `scripts` folder). The first time, it creates a settings file and tells you where it is. Open that file, check the server address (the default is https://chat.codered.lol), save it, then double-click the setup file again. Use the arrow keys to pick **Install** and press Enter, then press Y.
-3. Open Fluxer from the new **Fluxer (my instance)** shortcut on your Desktop or in the Start Menu. It also opens that way when you sign in to Windows.
+3. Open Fluxer from its normal Start Menu, Desktop or taskbar icon. The setup has told those icons to use your server. It also opens on your server when you sign in to Windows.
 
 To remove everything, double-click `Fluxer Instance Setup.bat` and pick **Uninstall**. Fluxer itself is never touched.
 
 The setup window shows the current status at the top in plain words: what is in place and what is not. If something looks wrong, pick **Install** and it puts it right.
 
-After a Fluxer update the app may open on the official server once. Close it and use the shortcut again.
+After a Fluxer update, if Fluxer opens on the official server, close it, run `Fluxer Instance Setup.bat` and pick **Install** again.
 
 ## For developers
 
@@ -24,13 +24,13 @@ With no action the script shows the status, then a menu (Install, Uninstall, Qui
 
 | Action | What it does |
 |---|---|
-| `launch` | Starts Fluxer with the flag. Refuses if Fluxer already runs on another instance unless `-ForceRestart`. Used by the shortcut and the login entry. |
-| `apply` | Creates or fixes the shortcuts and the `FluxerInstance` Run value, removes Fluxer's own `Fluxer.Fluxer` Run value. Safe to repeat. |
+| `launch` | Starts Fluxer with the flag. Refuses if Fluxer already runs on another instance unless `-ForceRestart`. Used by the login entry. |
+| `apply` | Makes each existing Fluxer icon (Start Menu, Desktop, taskbar) pass `--fluxer-app-url=<server>` (replacing any existing one, keeping other arguments), removes shortcuts an earlier version made, sets the `FluxerInstance` Run value, removes Fluxer's own `Fluxer.Fluxer` Run value. Safe to repeat. |
 | `repair` | Same as `apply`, silent when nothing drifted. Runs 15 seconds after each `launch`. |
-| `status` | Lists each entry as OK, MISSING or DRIFT. Exit 0 if all is well, 1 otherwise. |
-| `uninstall` | Removes everything the launcher made and restores the stock `fluxer://` handler if it was patched. |
+| `status` | Prints a plain summary, then dot points. Exit 0 if all is well, 1 otherwise. |
+| `uninstall` | Takes only the `--fluxer-app-url` argument off the Fluxer icons, removes the Run value and restores the stock `fluxer://` handler if it was patched. |
 
-Options: `-DryRun` prints instead of changing; `-Yes` skips the menu's confirmation; `-AllowInsecure` permits `http://`; `-ConfigPath`, `-Root` and `-RegistryBase` redirect config, shortcuts and registry writes (the tests use these on a throwaway key and folder). Exit codes: 0 ok, 1 status problem, 2 error, 3 settings file just created (or Fluxer running elsewhere on `launch`).
+Options: `-DryRun` prints instead of changing; `-Yes` skips the menu's confirmation; `-AllowInsecure` permits `http://`; `-ConfigPath`, `-Root` and `-RegistryBase` redirect config, icons and registry writes (the tests use these on a throwaway key and folder). Exit codes: 0 ok, 1 status problem, 2 error, 3 settings file just created (or Fluxer running elsewhere on `launch`).
 
 Settings live in `config/config.json` (gitignored). If it is missing the script creates it from a template built into the script; `config/config.example.json` is documentation only and no code reads it.
 
@@ -40,12 +40,11 @@ Settings live in `config/config.json` (gitignored). If it is missing the script 
 | `autostart` | `true` | Open Fluxer on your instance at login. |
 | `autostart_delay_seconds` | `15` | Wait before the login launch. |
 | `handler_patch` | `false` | Opt in to rewriting the `fluxer://` handler (Fluxer rewrites it back on every launch). |
-| `shortcut_name` | `Fluxer (my instance)` | Name of the shortcut the launcher owns. |
 | `repair_after_launch_seconds` | `15` | Run `repair` this long after `launch`; `0` turns it off. |
 
 Tests: `Invoke-Pester tests` (Windows PowerShell 5.1, Pester 3) and `python -m pytest tests`. The menu tests feed keys through the `FLI_TEST_KEYS` environment variable.
 
-Still to do: a real before and after Fluxer update test (apply, status, reboot, let Fluxer update, status again, and record which entries survived).
+Still to do: a real before and after Fluxer update test (apply, status, reboot, let Fluxer update, status again, and record which icons kept the argument; the updater may recreate them). Old settings files that still contain `shortcut_name` keep working; the key is ignored.
 
 ## Licence
 

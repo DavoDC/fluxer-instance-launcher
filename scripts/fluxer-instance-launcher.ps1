@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Starts the official Fluxer desktop app on your chosen instance and keeps it there after Fluxer updates.
 .DESCRIPTION
@@ -6,8 +6,9 @@
   Actions for scripts and tests: launch, apply, repair, status, uninstall. See README.md.
   Reads config\config.json; if it is missing, creates it from a template built into this script and exits 3.
   No network, no admin rights.
-  Writes only: the HKCU Run value FluxerInstance, its own shortcuts, and (opt-in) the fluxer:// handler.
-  Test and safety parameters: -Root redirects Desktop, Start Menu and LocalAppData into a folder,
+  Writes only: the HKCU Run value FluxerInstance, the --fluxer-app-url argument of Fluxer's own icons
+  (Start Menu, Desktop, taskbar), and (opt-in) the fluxer:// handler. It creates no shortcut of its own.
+  Test and safety parameters: -Root redirects Desktop, Start Menu, taskbar and LocalAppData into a folder,
   -RegistryBase redirects the registry writes to another key, -DryRun prints instead of changing anything.
 .EXAMPLE
   .\fluxer-instance-launcher.ps1 status
@@ -49,7 +50,6 @@ $DefaultConfigJson = @'
   "autostart": true,
   "autostart_delay_seconds": 15,
   "handler_patch": false,
-  "shortcut_name": "Fluxer (my instance)",
   "repair_after_launch_seconds": 15
 }
 '@
@@ -69,14 +69,12 @@ function Get-Config {
         exit 3
     }
     try { $c = Get-Content -Raw -Path $path | ConvertFrom-Json } catch { Stop-WithError "Config is not valid JSON: $path" }
-    Write-Host "Config: $path"
     $get = { param($n, $d) if ($null -ne $c.$n) { $c.$n } else { $d } }
     [pscustomobject]@{
         Url             = [string](& $get 'instance_url' '')
         Autostart       = [bool](& $get 'autostart' $true)
         AutostartDelay  = [int](& $get 'autostart_delay_seconds' 15)
         HandlerPatch    = [bool](& $get 'handler_patch' $false)
-        ShortcutName    = [string](& $get 'shortcut_name' 'Fluxer (my instance)')
         RepairAfterSecs = [int](& $get 'repair_after_launch_seconds' 15)
     }
 }
@@ -97,14 +95,23 @@ function Get-Locations {
         $desk = Join-Path $Root 'Desktop'
         $menu = Join-Path $Root 'StartMenu'
         $local = Join-Path $Root 'LocalAppData'
+        $task = Join-Path $Root 'Taskbar'
     } else {
         $desk = [Environment]::GetFolderPath('Desktop')
         $menu = [Environment]::GetFolderPath('Programs')
         $local = $env:LOCALAPPDATA
+        $task = Join-Path $env:APPDATA 'Microsoft\Internet Explorer\Quick Launch\User Pinned\TaskBar'
     }
-    $exe = if ($FluxerExe) { $FluxerExe } else { Join-Path $local 'fluxer_desktop\Fluxer.exe' }
+    $exe = if ($FluxerExe) { $FluxerExe } else { Join-Path $local 'fluxer_desktop\current\Fluxer.exe' }
     [pscustomobject]@{
-        Folders    = @($desk, $menu)
+        # Fluxer's own icons; only those that exist are ever touched.
+        Icons      = @(
+            [pscustomobject]@{ Name = 'Start Menu'; Path = (Join-Path $menu 'Fluxer Platform AB\Fluxer.lnk') }
+            [pscustomobject]@{ Name = 'Desktop'; Path = (Join-Path $desk 'Fluxer.lnk') }
+            [pscustomobject]@{ Name = 'taskbar'; Path = (Join-Path $task 'Fluxer.lnk') }
+        )
+        # Shortcuts an earlier version of this launcher made.
+        Legacy     = @((Join-Path $desk 'Fluxer (my instance).lnk'), (Join-Path $menu 'Fluxer (my instance).lnk'))
         FluxerExe  = $exe
         RunKey     = Join-Path $RegistryBase 'Microsoft\Windows\CurrentVersion\Run'
         HandlerKey = Join-Path $RegistryBase 'Classes\fluxer\shell\open\command'
@@ -128,25 +135,47 @@ function Get-ExpectedRunValue($cfg) {
     '"{0}" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{1}" launch -DelaySeconds {2}' -f $PowerShellExe, $ScriptPath, $cfg.AutostartDelay
 }
 
-function Get-ExpectedShortcutArgs {
-    '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{0}" launch' -f $ScriptPath
+$UrlFlagPattern = '--fluxer-app-url=("[^"]*"|\S*)'
+
+# Returns the argument string with exactly one --fluxer-app-url=<Url> (replacing the first, dropping extras, keeping all else).
+# With -Url '' it strips the flag instead.
+function Set-UrlFlag([string]$ArgString, [string]$Url) {
+    $script:flagSeen = 0
+    $flag = if ($Url) { "--fluxer-app-url=$Url" } else { '' }
+    $new = [regex]::Replace($ArgString, $UrlFlagPattern, [System.Text.RegularExpressions.MatchEvaluator] {
+        param($m)
+        $script:flagSeen++
+        if ($script:flagSeen -eq 1) { $flag } else { '' }
+    })
+    if ($flag -and $script:flagSeen -eq 0) { $new = "$new $flag" }
+    ($new -replace '\s{2,}', ' ').Trim()
 }
 
-function Get-ShortcutState($lnkPath) {
-    if (-not (Test-Path $lnkPath)) { return 'missing' }
-    $l = (New-Object -ComObject WScript.Shell).CreateShortcut($lnkPath)
-    if ($l.TargetPath -eq $PowerShellExe -and $l.Arguments -eq (Get-ExpectedShortcutArgs)) { 'ok' } else { 'drift' }
+# 'ok' (exactly the wanted flag), 'official' (no flag), 'other' (a different or duplicated flag).
+function Get-FlagState([string]$ArgString, [string]$Url) {
+    $m = [regex]::Matches($ArgString, $UrlFlagPattern)
+    if ($m.Count -eq 0) { return 'official' }
+    if ($m.Count -eq 1 -and $m[0].Value -eq "--fluxer-app-url=$Url") { return 'ok' }
+    'other'
 }
 
-function Set-Shortcut($lnkPath, $loc) {
-    New-Item -ItemType Directory -Path (Split-Path -Parent $lnkPath) -Force | Out-Null
-    $l = (New-Object -ComObject WScript.Shell).CreateShortcut($lnkPath)
-    $l.TargetPath = $PowerShellExe
-    $l.Arguments = Get-ExpectedShortcutArgs
-    $l.WindowStyle = 7
-    $l.Description = 'Fluxer on your own instance (fluxer-instance-launcher)'
-    if (Test-Path $loc.FluxerExe) { $l.IconLocation = "$($loc.FluxerExe),0" }
+function Get-LnkArguments([string]$Path) {
+    (New-Object -ComObject WScript.Shell).CreateShortcut($Path).Arguments
+}
+
+# Saving through WScript.Shell keeps target, working folder, icon and the AppUserModelID/toast properties
+# (checked on a copy of the real Fluxer.lnk), so only Arguments is assigned.
+function Set-LnkArguments([string]$Path, [string]$ArgString) {
+    $l = (New-Object -ComObject WScript.Shell).CreateShortcut($Path)
+    $l.Arguments = $ArgString
     $l.Save()
+}
+
+# True for a shortcut an earlier version of this launcher made (it ran this script through PowerShell).
+function Test-LegacyOwn([string]$Path) {
+    if (-not (Test-Path $Path)) { return $false }
+    $l = (New-Object -ComObject WScript.Shell).CreateShortcut($Path)
+    ($l.TargetPath -eq $PowerShellExe) -and ($l.Arguments -match 'fluxer-instance-launcher\.ps1')
 }
 
 function Get-HandlerExe([string]$Value) {
@@ -179,11 +208,22 @@ function Sync-Entries($cfg, $loc, [bool]$Quiet) {
         $script:ChangeCount++
     }
 
-    # 3. our shortcuts
-    foreach ($folder in $loc.Folders) {
-        $lnk = Join-Path $folder "$($cfg.ShortcutName).lnk"
-        if ((Get-ShortcutState $lnk) -ne 'ok') {
-            Invoke-Change "write shortcut $lnk" { Set-Shortcut $lnk $loc }
+    # 3. Fluxer's own icons: make each existing one carry the flag
+    foreach ($icon in $loc.Icons) {
+        if (-not (Test-Path $icon.Path)) { continue }
+        $cur = Get-LnkArguments $icon.Path
+        if ((Get-FlagState $cur $cfg.Url) -ne 'ok') {
+            $want = Set-UrlFlag $cur $cfg.Url
+            $lnkPath = $icon.Path
+            Invoke-Change "make the $($icon.Name) Fluxer icon open $($cfg.Url) ($lnkPath)" { Set-LnkArguments $lnkPath $want }
+            $script:ChangeCount++
+        }
+    }
+
+    # 3b. shortcuts of an earlier version of this launcher
+    foreach ($old in $loc.Legacy) {
+        if (Test-LegacyOwn $old) {
+            Invoke-Change "delete the old launcher shortcut $old" { Remove-Item -Path $old -Force }
             $script:ChangeCount++
         }
     }
@@ -210,41 +250,60 @@ function Sync-Entries($cfg, $loc, [bool]$Quiet) {
 }
 
 # ---------- status ----------
-function Show-Status($cfg, $loc) {
-    $bad = 0
-    $line = {
-        param($state, $text)
-        Write-Host ('[{0}] {1}' -f $state, $text)
-        if ($state -ne 'OK' -and $state -ne 'INFO') { $script:bad++ }
+function Join-Names([string[]]$Names) {
+    if ($Names.Count -le 1) { return ($Names -join '') }
+    ($Names[0..($Names.Count - 2)] -join ', ') + ' and ' + $Names[-1]
+}
+
+# Plain status: summary first, then dot points. Returns the number of problems (0 = all well).
+function Show-StatusPlain($cfg, $loc) {
+    if (-not (Test-Path $loc.FluxerExe)) {
+        Write-Host 'Fluxer is not installed yet. Install Fluxer first, then open this setup again.' -ForegroundColor Red
+        return 1
     }
-    $script:bad = 0
-    Write-Host "Instance: $($cfg.Url)"
+    $good = New-Object System.Collections.Generic.List[string]
+    $bad = New-Object System.Collections.Generic.List[string]
+
+    $present = @($loc.Icons | Where-Object { Test-Path $_.Path })
+    $okNames = @()
+    foreach ($icon in $present) {
+        switch (Get-FlagState (Get-LnkArguments $icon.Path) $cfg.Url) {
+            'ok'       { $okNames += $icon.Name }
+            'official' { $bad.Add("The $($icon.Name) Fluxer icon opens the official server.") }
+            default    { $bad.Add("The $($icon.Name) Fluxer icon opens a different server.") }
+        }
+    }
+    if ($present.Count -eq 0) { $bad.Add('No Fluxer icon (Start Menu, Desktop or taskbar) was found. Open Fluxer once so it makes its icons, then pick Install.') }
+    if ($okNames.Count -gt 0) {
+        $verb = if ($okNames.Count -eq 1) { "The $(Join-Names $okNames) Fluxer icon uses your server." } else { "The $(Join-Names $okNames) Fluxer icons use your server." }
+        $good.Add($verb)
+    }
+
     $runNow = Get-RegValue $loc.RunKey $RunValueName
     if ($cfg.Autostart) {
-        if ($runNow -eq (Get-ExpectedRunValue $cfg)) { & $line 'OK' "Run value $RunValueName" }
-        elseif ($null -eq $runNow) { & $line 'MISSING' "Run value $RunValueName (run: apply)" }
-        else { & $line 'DRIFT' "Run value $RunValueName differs (run: repair)" }
+        if ($runNow -eq (Get-ExpectedRunValue $cfg)) { $good.Add('Fluxer opens on your server when you sign in to Windows.') }
+        else { $bad.Add('Fluxer is not set to open on your server when you sign in to Windows.') }
     } else {
-        if ($null -eq $runNow) { & $line 'OK' "autostart off, no Run value $RunValueName" } else { & $line 'DRIFT' "Run value $RunValueName present but autostart is off" }
+        if ($null -eq $runNow) { $good.Add('Fluxer does not open when you sign in to Windows (switched off in your settings).') }
+        else { $bad.Add('Opening at sign-in is switched off in your settings, but it is still on.') }
     }
-    if ($null -eq (Get-RegValue $loc.RunKey $FluxerRunValueName)) { & $line 'OK' "Fluxer's own autostart ($FluxerRunValueName) absent" }
-    else { & $line 'DRIFT' "Fluxer's own autostart ($FluxerRunValueName) is back; it starts the official instance (run: repair)" }
-    foreach ($folder in $loc.Folders) {
-        $lnk = Join-Path $folder "$($cfg.ShortcutName).lnk"
-        $s = Get-ShortcutState $lnk
-        $label = "shortcut $lnk"
-        if ($s -eq 'ok') { & $line 'OK' $label } elseif ($s -eq 'missing') { & $line 'MISSING' "$label (run: apply)" } else { & $line 'DRIFT' "$label differs (run: repair)" }
-    }
-    $hNow = Get-RegValue $loc.HandlerKey '(default)'
+    if ($null -eq (Get-RegValue $loc.RunKey $FluxerRunValueName)) { $good.Add('Fluxer is not starting itself on the official server.') }
+    else { $bad.Add('Fluxer is set to start itself on the official server.') }
+
     if ($cfg.HandlerPatch) {
-        if ($null -eq $hNow) { & $line 'INFO' 'fluxer:// handler not registered, nothing to patch' }
-        elseif ($hNow -match [regex]::Escape("--fluxer-app-url=$($cfg.Url)")) { & $line 'OK' 'fluxer:// handler carries the instance' }
-        else { & $line 'DRIFT' 'fluxer:// handler lacks the instance (Fluxer rewrites it every launch; run: repair)' }
-    } else {
-        & $line 'INFO' 'fluxer:// handler not managed (handler_patch is false)'
+        $hNow = Get-RegValue $loc.HandlerKey '(default)'
+        if ($null -ne $hNow -and $hNow -notmatch [regex]::Escape("--fluxer-app-url=$($cfg.Url)")) { $bad.Add('Links that open Fluxer (fluxer://) do not use your server.') }
     }
-    if (Test-Path $loc.FluxerExe) { & $line 'INFO' "Fluxer found at $($loc.FluxerExe)" } else { & $line 'INFO' "Fluxer.exe not found at $($loc.FluxerExe)" }
-    return $script:bad
+    if (@($loc.Legacy | Where-Object { Test-LegacyOwn $_ }).Count -gt 0) { $bad.Add('An old "Fluxer (my instance)" icon from an earlier version is still there.') }
+
+    if ($bad.Count -eq 0) {
+        Write-Host "Everything is working. Fluxer opens on your self-hosted server ($($cfg.Url))." -ForegroundColor Green
+        foreach ($g in $good) { Write-Host "  - $g" }
+    } else {
+        Write-Host 'Something needs fixing. Pick Install and it will be put right.' -ForegroundColor Red
+        foreach ($b in $bad) { Write-Host "  - $b" -ForegroundColor Red }
+    }
+    return $bad.Count
 }
 
 # ---------- launch ----------
@@ -286,9 +345,17 @@ function Remove-Entries($cfg, $loc) {
     if ($null -ne (Get-RegValue $loc.RunKey $RunValueName)) {
         Invoke-Change "remove Run value $RunValueName" { Remove-ItemProperty -Path $loc.RunKey -Name $RunValueName }
     }
-    foreach ($folder in $loc.Folders) {
-        $lnk = Join-Path $folder "$($cfg.ShortcutName).lnk"
-        if (Test-Path $lnk) { Invoke-Change "delete shortcut $lnk" { Remove-Item -Path $lnk -Force } }
+    foreach ($icon in $loc.Icons) {
+        if (-not (Test-Path $icon.Path)) { continue }
+        $cur = Get-LnkArguments $icon.Path
+        if ((Get-FlagState $cur $cfg.Url) -ne 'official' -or $cur -match '--fluxer-app-url=') {
+            $want = Set-UrlFlag $cur ''
+            $lnkPath = $icon.Path
+            Invoke-Change "take the server address off the $($icon.Name) Fluxer icon ($lnkPath)" { Set-LnkArguments $lnkPath $want }
+        }
+    }
+    foreach ($old in $loc.Legacy) {
+        if (Test-LegacyOwn $old) { Invoke-Change "delete the old launcher shortcut $old" { Remove-Item -Path $old -Force } }
     }
     $hNow = Get-RegValue $loc.HandlerKey '(default)'
     $exe = if ($hNow) { Get-HandlerExe $hNow } else { $null }
@@ -296,7 +363,7 @@ function Remove-Entries($cfg, $loc) {
         $stock = '"{0}" "%1"' -f $exe
         Invoke-Change 'restore the stock fluxer:// handler' { Set-ItemProperty -Path $loc.HandlerKey -Name '(default)' -Value $stock }
     }
-    Write-Host 'Uninstall done. Fluxer itself is untouched; turn its own autostart on in its settings if you want it.'
+    Write-Host 'Uninstall done. Fluxer and its icons are still there and open the official server again; turn its own autostart on in its settings if you want it.'
 }
 
 # ---------- menu (for people; scripts and tests pass an action instead) ----------
@@ -362,27 +429,6 @@ function Confirm-Yes([string]$Question) {
     }
 }
 
-function Show-StatusPlain($cfg, $loc) {
-    $script:plainBad = 0
-    $say = {
-        param($good, $goodText, $badText)
-        if ($good) { Write-Host "  [good] $goodText" -ForegroundColor Green } else { Write-Host "  [problem] $badText" -ForegroundColor Red; $script:plainBad++ }
-    }
-    Write-Host "Your Fluxer address: $($cfg.Url)"
-    & $say (Test-Path $loc.FluxerExe) 'Fluxer is installed.' 'Fluxer does not seem to be installed yet. Install Fluxer first.'
-    $runNow = Get-RegValue $loc.RunKey $RunValueName
-    if ($cfg.Autostart) { & $say ($runNow -eq (Get-ExpectedRunValue $cfg)) 'Fluxer will open on your address when you sign in to Windows.' 'Fluxer is not set to open on your address at sign-in. Pick Install to fix it.' }
-    else { & $say ($null -eq $runNow) 'Opening at sign-in is switched off in your settings, and it is off.' 'Opening at sign-in is switched off in your settings, but it is still on. Pick Install to fix it.' }
-    & $say ($null -eq (Get-RegValue $loc.RunKey $FluxerRunValueName)) 'Fluxer is not starting itself on the official server.' 'Fluxer is set to start itself on the official server. Pick Install to fix it.'
-    $names = @('Desktop', 'Start Menu')
-    for ($i = 0; $i -lt $loc.Folders.Count; $i++) {
-        $s = Get-ShortcutState (Join-Path $loc.Folders[$i] "$($cfg.ShortcutName).lnk")
-        & $say ($s -eq 'ok') "The $($names[$i]) shortcut `"$($cfg.ShortcutName)`" is in place." "The $($names[$i]) shortcut `"$($cfg.ShortcutName)`" is missing or wrong. Pick Install to fix it."
-    }
-    if ($script:plainBad -eq 0) { Write-Host 'Everything is working.' -ForegroundColor Green } else { Write-Host 'Something needs fixing. Pick Install and it will be put right.' -ForegroundColor Red }
-    return $script:plainBad
-}
-
 function Invoke-Menu($cfg, $loc) {
     $script:MenuCfg = $cfg
     $script:MenuLoc = $loc
@@ -393,17 +439,17 @@ function Invoke-Menu($cfg, $loc) {
         'Install' {
             Write-Host 'Install will:'
             Write-Host "  - make Fluxer open on $($cfg.Url)"
-            Write-Host "  - add a shortcut called `"$($cfg.ShortcutName)`" to your Desktop and Start Menu"
+            Write-Host '  - set up the Fluxer icons you already have (Start Menu, Desktop, taskbar) to open your server'
             if ($cfg.Autostart) { Write-Host '  - open Fluxer that way when you sign in to Windows' }
             Write-Host "  - turn off Fluxer's own start-up entry, so it does not open the official server"
             Write-Host 'Nothing needs administrator rights, and Uninstall undoes it all.'
             if (-not (Confirm-Yes 'Go ahead?')) { Write-Host 'Cancelled. Nothing was changed.'; return 0 }
             Sync-Entries $cfg $loc $false
-            Write-Host "Done. Open Fluxer from the `"$($cfg.ShortcutName)`" shortcut."
+            Write-Host 'Done. Open Fluxer from its normal Start Menu, Desktop or taskbar icon.'
             return 0
         }
         'Uninstall' {
-            Write-Host 'Uninstall removes the shortcuts and the sign-in entry this tool made. Fluxer itself is not touched.'
+            Write-Host 'Uninstall takes your server off the Fluxer icons and removes the sign-in entry this tool made. Fluxer itself is not touched.'
             if (-not (Confirm-Yes 'Go ahead?')) { Write-Host 'Cancelled. Nothing was changed.'; return 0 }
             Remove-Entries $cfg $loc
             return 0
@@ -433,7 +479,7 @@ if ($Action -eq '') {
 switch ($Action) {
     'apply'     { Sync-Entries $cfg $loc $false }
     'repair'    { Sync-Entries $cfg $loc $true }
-    'status'    { $code = if ((Show-Status $cfg $loc) -gt 0) { 1 } else { 0 } }
+    'status'    { $code = if ((Show-StatusPlain $cfg $loc) -gt 0) { 1 } else { 0 } }
     'uninstall' { Remove-Entries $cfg $loc }
     'launch'    { $code = Start-Fluxer $cfg $loc }
 }
