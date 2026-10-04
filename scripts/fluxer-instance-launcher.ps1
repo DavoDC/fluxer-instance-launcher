@@ -449,11 +449,13 @@ function Invoke-Menu($cfg, $loc) {
     switch ($choice) {
         'Install' {
             Write-Host 'Install will:'
-            Write-Host "  - make Fluxer open on $($cfg.Url)"
-            Write-Host '  - set up the Fluxer icons you already have (Start Menu, Desktop, taskbar) to open your server'
-            if ($cfg.Autostart) { Write-Host '  - open Fluxer that way when you sign in to Windows' }
-            Write-Host "  - turn off Fluxer's own start-up entry, so it does not open the official server"
-            Write-Host 'Nothing needs administrator rights, and Uninstall undoes it all.'
+            Write-Host "  - make the Fluxer icons you already have (Start Menu, Desktop, taskbar) open $($cfg.Url)"
+            if ($cfg.Autostart) { Write-Host '  - open Fluxer on your server when you sign in to Windows' }
+            Write-Host "  - turn off Fluxer's own sign-in start, so it does not open the official server"
+            if (@($loc.Legacy | Where-Object { Test-LegacyOwn $_ }).Count -gt 0) { Write-Host '  - delete the old shortcut an earlier version of this setup made' }
+            if ($cfg.HandlerPatch) { Write-Host '  - make fluxer:// links open on your server' }
+            Write-Host 'It needs no administrator rights, creates no scheduled tasks, and Uninstall undoes it all.'
+            Write-Host ''
             if (-not (Confirm-Yes 'Go ahead?')) { Write-Host 'Cancelled. Nothing was changed.'; return 0 }
             Sync-Entries $cfg $loc $false
             Write-Host 'Done. Open Fluxer from its normal Start Menu, Desktop or taskbar icon.'
