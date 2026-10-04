@@ -2,7 +2,7 @@
 .SYNOPSIS
   Starts the official Fluxer desktop app on your chosen instance and keeps it there after Fluxer updates.
 .DESCRIPTION
-  With no action it opens an arrow-key menu (Install, Uninstall, Status) for people.
+  With no action it opens an arrow-key menu (shows your status, then Install, Uninstall, Quit) for people.
   Actions for scripts and tests: launch, apply, repair, status, uninstall. See README.md.
   Reads config\config.json; if it is missing, creates it from a template built into this script and exits 3.
   No network, no admin rights.
@@ -300,7 +300,9 @@ function Remove-Entries($cfg, $loc) {
 }
 
 # ---------- menu (for people; scripts and tests pass an action instead) ----------
-$MenuItems = @('Install', 'Uninstall', 'Status')
+$MenuItems = @('Install', 'Uninstall', 'Quit')
+$script:MenuCfg = $null
+$script:MenuLoc = $null
 
 # Reads one key code. FLI_TEST_KEYS (comma list of Up, Down, Enter, Esc, Y, N) replaces the keyboard in tests.
 function Read-KeyCode {
@@ -331,6 +333,7 @@ function Show-Menu([int]$Index) {
     try { Clear-Host } catch { }
     Write-Host 'Fluxer Instance Setup'
     Write-Host ''
+    if ($null -ne $script:MenuCfg) { [void](Show-StatusPlain $script:MenuCfg $script:MenuLoc); Write-Host '' }
     Write-Host 'Use the arrow keys, then press Enter. Press Esc to quit.'
     Write-Host ''
     for ($i = 0; $i -lt $MenuItems.Count; $i++) {
@@ -381,8 +384,10 @@ function Show-StatusPlain($cfg, $loc) {
 }
 
 function Invoke-Menu($cfg, $loc) {
+    $script:MenuCfg = $cfg
+    $script:MenuLoc = $loc
     $choice = Read-Menu
-    if ($null -eq $choice) { return 0 }
+    if ($null -eq $choice -or $choice -eq 'Quit') { return 0 }
     Write-Host ''
     switch ($choice) {
         'Install' {
@@ -403,7 +408,6 @@ function Invoke-Menu($cfg, $loc) {
             Remove-Entries $cfg $loc
             return 0
         }
-        'Status' { if ((Show-StatusPlain $cfg $loc) -gt 0) { return 1 } else { return 0 } }
     }
     return 0
 }

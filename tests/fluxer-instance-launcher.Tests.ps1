@@ -308,20 +308,21 @@ function Invoke-Menu($sb, [string]$Keys, [string[]]$Extra = @()) {
 Describe 'menu' {
     $sb = New-Sandbox
     Set-TestConfig $sb
-    It 'shows only Install, Uninstall and Status' {
+    It 'shows the status first, then only Install, Uninstall and Quit' {
         $r = Invoke-Menu $sb 'Esc'
         $r.Code | Should Be 0
         $r.Out | Should Match 'Install'
         $r.Out | Should Match 'Uninstall'
-        $r.Out | Should Match 'Status'
+        $r.Out | Should Match 'Quit'
+        $r.Out | Should Match 'Your Fluxer address'
         $r.Out | Should Not Match 'Repair|Launch|Dry'
     }
     It 'Esc quits without changing anything' {
         Get-RunValue $sb 'FluxerInstance' | Should BeNullOrEmpty
     }
-    It 'Down wraps and Up moves back: Status is reachable with Up from the top' {
+    It 'Up from the top wraps to Quit and changes nothing' {
         $r = Invoke-Menu $sb 'Up,Enter'
-        $r.Out | Should Match 'working|problem|Fluxer is'
+        $r.Code | Should Be 0
         Get-RunValue $sb 'FluxerInstance' | Should BeNullOrEmpty
     }
     It 'Install then N cancels and changes nothing' {
@@ -335,10 +336,10 @@ Describe 'menu' {
         Get-RunValue $sb 'FluxerInstance' | Should Not BeNullOrEmpty
         @(Get-ChildItem (Join-Path $sb.Dir 'Desktop') -Filter *.lnk).Count | Should Be 1
     }
-    It 'Status in plain words reports good after install' {
+    It 'the status shown above the menu reports good after install' {
         $fake = Join-Path $sb.Dir 'Fluxer.exe'
         'x' | Set-Content $fake
-        $r = Invoke-Menu $sb 'Up,Enter' @('-FluxerExe', $fake)
+        $r = Invoke-Menu $sb 'Esc' @('-FluxerExe', $fake)
         $r.Code | Should Be 0
         $r.Out | Should Match 'Everything is working'
     }

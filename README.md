@@ -12,7 +12,7 @@ Makes the Fluxer desktop app open on a self-hosted server instead of the officia
 
 To remove everything, double-click `Fluxer Instance Setup.bat` and pick **Uninstall**. Fluxer itself is never touched.
 
-If something looks wrong, pick **Status**. It says in plain words what is in place and what is not, and **Install** puts it right.
+The setup window shows the current status at the top in plain words: what is in place and what is not. If something looks wrong, pick **Install** and it puts it right.
 
 After a Fluxer update the app may open on the official server once. Close it and use the shortcut again.
 
@@ -20,7 +20,7 @@ After a Fluxer update the app may open on the official server once. Close it and
 
 PowerShell 5.1 script `scripts/fluxer-instance-launcher.ps1`, started by the thin `scripts/Fluxer Instance Setup.bat`. Fluxer has no instance picker; the only way is the launch flag `--fluxer-app-url=<instance>`, which it never saves. Similar tools exist (`omgitsyasir/fluxer-desktop-instance-swapper`, `gogy-no-one/gogys-fluxer`, `nfb04/fluxer-desktop-app-multi-instance`); this one keeps the unmodified official app and focuses on surviving updates.
 
-With no action the script opens the menu (Install, Uninstall, Status). With an action it runs without any menu, which is what tests and Claude use:
+With no action the script shows the status, then a menu (Install, Uninstall, Quit). With an action it runs without any menu, which is what tests and Claude use:
 
 | Action | What it does |
 |---|---|
