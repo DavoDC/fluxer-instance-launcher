@@ -681,6 +681,11 @@ Describe 'install question for the update watcher' {
         (Get-ConfigJson $sb).watch_updates | Should Be $true
         (Get-RunValue $sb 'FluxerInstance') | Should Match ' watch '
     }
+    It 'never says everything is already in place under a Changes made list' {
+        $r = Invoke-Menu $sb 'Enter,Y,Y'
+        $r.Out | Should Match 'Changes made:'
+        $r.Out | Should Not Match 'already in place'
+    }
     It 'is not asked with -Yes, and keeps the config value' {
         $r = Invoke-Menu $sb 'Enter' @('-Yes')
         $r.Out | Should Not Match 'background helper'

@@ -282,7 +282,7 @@ function Sync-Entries($cfg, $loc, [bool]$Quiet) {
     }
 
     Write-Log "sync: $($script:ChangeCount) change(s) needed or made (quiet=$Quiet)"
-    if ($script:ChangeCount -eq 0 -and -not $Quiet) { Write-Host '[ok] everything already in place' }
+    if ($script:ChangeCount -eq 0 -and $before -eq 0 -and -not $Quiet) { Write-Host '[ok] everything already in place' }
     $script:ChangeCount = $before + $script:ChangeCount
 }
 
@@ -619,7 +619,7 @@ function Invoke-Menu($cfg, $loc) {
             }
             Write-Host ''
             Write-Host 'Changes made:'
-            if ($saveWatch) { $want = $cfg.WatchUpdates; Invoke-Change 'save the update watcher choice in your settings file' { Save-WatchChoice $want } "saved your update choice ($([System.IO.Path]::GetFullPath($ConfigPath)))" }
+            if ($saveWatch) { $want = $cfg.WatchUpdates; Invoke-Change 'save the update watcher choice in your settings file' { Save-WatchChoice $want } "saved your update choice ($([System.IO.Path]::GetFullPath($ConfigPath)))"; $script:ChangeCount++ }
             Sync-Entries $cfg $loc $false
             Stop-FluxerNotOnServer $cfg $loc
             Start-WatcherNow $cfg
