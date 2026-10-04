@@ -3,7 +3,7 @@
   Starts the official Fluxer desktop app on your chosen instance and keeps it there after Fluxer updates.
 .DESCRIPTION
   With no action it opens an arrow-key menu (shows your status, then Install, Uninstall, Quit) for people.
-  Actions for scripts and tests: launch, apply, repair, status, uninstall. See README.md.
+  Actions for scripts and tests: launch, watch, apply, repair, status, uninstall. See README.md.
   Reads config\config.json; if it is missing, creates it from a template built into this script and exits 3.
   No network, no admin rights.
   Writes only: the HKCU Run value FluxerInstance, the --fluxer-app-url argument of Fluxer's own icons
@@ -18,7 +18,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('', 'launch', 'apply', 'repair', 'status', 'uninstall')]
+    [ValidateSet('', 'launch', 'watch', 'apply', 'repair', 'status', 'uninstall')]
     [string]$Action = '',
     [string]$ConfigPath,
     [string]$Root,
@@ -89,7 +89,8 @@ $DefaultConfigJson = @'
   "instance_url": "https://chat.codered.lol",
   "autostart": true,
   "autostart_delay_seconds": 15,
-  "repair_after_launch_seconds": 15
+  "repair_after_launch_seconds": 15,
+  "watch_updates": false
 }
 '@
 
@@ -117,6 +118,7 @@ function Get-Config {
         Autostart       = [bool](& $get 'autostart' $true)
         AutostartDelay  = [int](& $get 'autostart_delay_seconds' 15)
         RepairAfterSecs = [int](& $get 'repair_after_launch_seconds' 15)
+        WatchUpdates    = [bool](& $get 'watch_updates' $false)
     }
 }
 
@@ -178,7 +180,8 @@ function Get-RegValue([string]$Key, [string]$Name) {
 }
 
 function Get-ExpectedRunValue($cfg) {
-    '"{0}" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{1}" launch -DelaySeconds {2}' -f $PowerShellExe, $ScriptPath, $cfg.AutostartDelay
+    $mode = if ($cfg.WatchUpdates) { 'watch' } else { 'launch' }
+    '"{0}" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{1}" {3} -DelaySeconds {2}' -f $PowerShellExe, $ScriptPath, $cfg.AutostartDelay, $mode
 }
 
 $UrlFlagPattern = '--fluxer-app-url=("[^"]*"|\S*)'
@@ -331,6 +334,10 @@ function Show-StatusPlain($cfg, $loc) {
         if ($null -eq $runNow) { Add-Line 'note' 'Sign-in start: off, as set in your settings.' }
         else { Add-Line 'bad' 'Sign-in start: switched off in your settings, but still on.' }
     }
+    if ($cfg.WatchUpdates) {
+        if ($runNow -eq (Get-ExpectedRunValue $cfg)) { Add-Line 'good' 'Update watcher: on, so updates will not undo your server.' }
+        else { Add-Line 'bad' 'Update watcher: on in your settings, but not set up, so a Fluxer update can undo your server.' }
+    }
     if ($null -eq (Get-RegValue $loc.RunKey $FluxerRunValueName)) { Add-Line 'good' "Fluxer's own sign-in start: off, so it will not open on the official server." }
     else { Add-Line 'bad' "Fluxer's own sign-in start: on, so Fluxer will open on the official server when you sign in to Windows." }
 
@@ -360,10 +367,12 @@ function Get-FluxerNotOnServer($cfg, $loc) {
 }
 
 function Stop-FluxerNotOnServer($cfg, $loc) {
+    $script:LastStopped = $false
     $procs = @(Get-FluxerNotOnServer $cfg $loc)
     if ($procs.Count -eq 0) { Write-Log 'close: no Fluxer process open on another server'; return }
     foreach ($p in $procs) { Write-Log "close: Fluxer process PID $($p.ProcessId), path $($p.ExecutablePath), command line: $($p.CommandLine)" }
     Invoke-Change 'close Fluxer, which was open on another server' { $procs | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } } 'closed Fluxer, which was open on another server'
+    if (-not $DryRun) { $script:LastStopped = $true }
 }
 
 function Get-MainFluxerProcess {
@@ -402,6 +411,86 @@ function Start-Fluxer($cfg, $loc) {
     return 0
 }
 
+# ---------- update watcher (opt-in: watch_updates) ----------
+# A Fluxer update rewrites its icons without the server flag. This waits (no polling) for a change to those icons,
+# lets it settle, puts the flag back, closes Fluxer if it restarted on another server and opens it on yours.
+# FLI_TEST_WATCH_ONCE (seconds) is a test hook: skip the first launch, handle one change or time out, then exit.
+$WatchDebounceSeconds = 5
+
+function Save-WatchChoice([bool]$On) {
+    $c = Get-Content -Raw -Path $ConfigPath | ConvertFrom-Json
+    if ($null -ne $c.PSObject.Properties['watch_updates']) { $c.watch_updates = $On }
+    else { Add-Member -InputObject $c -NotePropertyName 'watch_updates' -NotePropertyValue $On }
+    ($c | ConvertTo-Json -Depth 5) | Set-Content -Path $ConfigPath -Encoding UTF8
+}
+
+# Other PowerShell processes running "watch" from this very script file; never this process, never anything else.
+function Get-WatcherProcesses {
+    try {
+        $all = @(Get-CimInstance Win32_Process -Filter "Name='powershell.exe'")
+    } catch { return @() }
+    $pattern = [regex]::Escape($ScriptPath) + '"?\s+watch\b'
+    @($all | Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -and $_.CommandLine -match $pattern })
+}
+
+function Stop-Watchers {
+    $procs = @(Get-WatcherProcesses)
+    if ($procs.Count -eq 0) { Write-Log 'uninstall: no update watcher process running for this script'; return }
+    foreach ($p in $procs) {
+        Write-Log "uninstall: update watcher process PID $($p.ProcessId), command line: $($p.CommandLine)"
+        $id = $p.ProcessId
+        Invoke-Change 'stop the background update helper' { Stop-Process -Id $id -Force -ErrorAction SilentlyContinue } 'stopped the background update helper'
+    }
+}
+
+function Watch-Icons($cfg, $loc) {
+    $once = 0
+    if ($env:FLI_TEST_WATCH_ONCE) { [void][int]::TryParse($env:FLI_TEST_WATCH_ONCE, [ref]$once) }
+    $debounce = if ($once -gt 0) { 1 } else { $WatchDebounceSeconds }
+    $dirs = @($loc.Icons | ForEach-Object { Split-Path -Parent $_.Path } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Unique)
+    foreach ($d in $dirs) { Write-Log "watch: folder $d" }
+    if ($DryRun) {
+        Write-Host "[dry-run] would: open Fluxer on $($cfg.Url), then wait for Fluxer's icons to change and put `"--fluxer-app-url=$($cfg.Url)`" back"
+        Write-Log "dry-run: would watch $($dirs.Count) folder(s) and re-apply after a change"
+        return 0
+    }
+    $watchers = @()
+    try {
+        $n = 0
+        foreach ($d in $dirs) {
+            $w = New-Object System.IO.FileSystemWatcher $d, '*.lnk'
+            $w.NotifyFilter = [System.IO.NotifyFilters]'FileName, LastWrite, CreationTime'
+            foreach ($evName in 'Created', 'Changed', 'Renamed') {
+                [void](Register-ObjectEvent -InputObject $w -EventName $evName -SourceIdentifier "FluxerIcons.$n.$evName")
+            }
+            $w.EnableRaisingEvents = $true
+            $watchers += $w
+            $n++
+        }
+        if ($once -gt 0) { Write-Log 'watch: test hook, first launch skipped' }
+        else { [void](Start-Fluxer $cfg $loc); $script:DelaySeconds = 0; $DelaySeconds = 0 }
+        while ($true) {
+            Write-Log 'watch: waiting for an icon change'
+            $ev = if ($once -gt 0) { @(Wait-Event -Timeout $once) } else { @(Wait-Event) }
+            if ($ev.Count -eq 0) { Write-Log 'watch: test hook timed out with no change'; return 0 }
+            Write-Log "watch: icon change seen: $($ev[0].SourceEventArgs.FullPath)"
+            do { Get-Event | Remove-Event; $more = @(Wait-Event -Timeout $debounce) } while ($more.Count -gt 0)
+            try {
+                Write-Log 'watch: change settled, re-applying'
+                Sync-Entries $cfg $loc $false
+                Stop-FluxerNotOnServer $cfg $loc
+                if ($script:LastStopped) { Start-Sleep -Seconds 2; [void](Start-Fluxer $cfg $loc) }
+            } catch { Write-Log "ERROR (watch pass): $($_.Exception.Message)" }
+            Start-Sleep -Seconds 2
+            Get-Event | Remove-Event
+            if ($once -gt 0) { Write-Log 'watch: test hook handled one change'; return 0 }
+        }
+    } finally {
+        Get-EventSubscriber | Where-Object { $_.SourceIdentifier -like 'FluxerIcons.*' } | Unregister-Event -ErrorAction SilentlyContinue
+        foreach ($w in $watchers) { try { $w.EnableRaisingEvents = $false; $w.Dispose() } catch { } }
+    }
+}
+
 # ---------- uninstall ----------
 function Remove-Entries($cfg, $loc) {
     Write-Host ''
@@ -409,6 +498,7 @@ function Remove-Entries($cfg, $loc) {
     if ($null -ne (Get-RegValue $loc.RunKey $RunValueName)) {
         Invoke-Change "remove Run value $RunValueName" { Remove-ItemProperty -Path $loc.RunKey -Name $RunValueName } 'removed the sign-in start'
     } else { Write-Log "uninstall: Run value $RunValueName not present in $($loc.RunKey)" }
+    Stop-Watchers
     foreach ($icon in $loc.Icons) {
         if (-not (Test-Path $icon.Path)) { Write-Log "uninstall: $($icon.Name) icon not present: $($icon.Path)"; continue }
         $cur = Get-LnkArguments $icon.Path
@@ -499,6 +589,7 @@ function Invoke-Menu($cfg, $loc) {
     Write-Host ''
     switch ($choice) {
         'Install' {
+            $saveWatch = $false
             Write-Host 'Install will:'
             Write-Host "  - make the Fluxer icons you already have (Start Menu, Desktop, taskbar) open $($cfg.Url)"
             if ($cfg.Autostart) { Write-Host '  - open Fluxer on your server when you sign in to Windows' }
@@ -508,8 +599,14 @@ function Invoke-Menu($cfg, $loc) {
             Write-Host 'It needs no administrator rights, creates no scheduled tasks, and Uninstall undoes it all.'
             Write-Host ''
             if (-not (Confirm-Yes 'Go ahead?')) { Write-Host 'Cancelled. Nothing was changed.'; return 0 }
+            if (-not $Yes) {
+                Write-Host ''
+                $cfg.WatchUpdates = Confirm-Yes 'Keep Fluxer on your server after updates? It uses a small background helper.'
+                $saveWatch = $true
+            }
             Write-Host ''
             Write-Host 'Changes made:'
+            if ($saveWatch) { $want = $cfg.WatchUpdates; Invoke-Change 'save the update watcher choice in your settings file' { Save-WatchChoice $want } "saved your update choice ($([System.IO.Path]::GetFullPath($ConfigPath)))" }
             Sync-Entries $cfg $loc $false
             Stop-FluxerNotOnServer $cfg $loc
             Write-Host ''
@@ -533,7 +630,7 @@ Initialize-Log
 Write-Log ("run start: action '{0}', arguments: {1}" -f $(if ($Action) { $Action } else { 'menu' }), (($PSBoundParameters.GetEnumerator() | ForEach-Object { "-$($_.Key) $($_.Value)" }) -join ' '))
 Write-Log "script: $ScriptPath, PowerShell $($PSVersionTable.PSVersion), user $env:USERNAME"
 if ($Action -eq '' -and $null -eq $env:FLI_TEST_KEYS -and [Console]::IsInputRedirected) {
-    Write-Host 'Usage: run "Fluxer Instance Setup.bat" with no arguments for the menu, or pass an action: launch, apply, repair, status, uninstall (options: -DryRun, -Yes).'
+    Write-Host 'Usage: run "Fluxer Instance Setup.bat" with no arguments for the menu, or pass an action: launch, watch, apply, repair, status, uninstall (options: -DryRun, -Yes).'
     Write-Log 'ERROR: no action and input is redirected, printed usage'
     Exit-Run 2
 }
@@ -557,6 +654,7 @@ switch ($Action) {
     'status'    { $code = if ((Show-StatusPlain $cfg $loc) -gt 0) { 1 } else { 0 } }
     'uninstall' { Remove-Entries $cfg $loc }
     'launch'    { $code = Start-Fluxer $cfg $loc }
+    'watch'     { $code = Watch-Icons $cfg $loc }
 }
 if ($Action -ne 'repair' -or $script:ChangeCount -gt 0) { Write-Host ('Done in {0:N1}s (exit {1})' -f $sw.Elapsed.TotalSeconds, $code) }
 Exit-Run $code

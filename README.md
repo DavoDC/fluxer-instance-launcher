@@ -35,6 +35,10 @@ Every Fluxer update undoes the setup, and Fluxer restarts on the official server
 2. Pick **Install**. It closes Fluxer for you.
 3. Open Fluxer from its normal Start Menu or taskbar icon.
 
+## Optional update watcher
+
+When you pick **Install**, the setup asks whether to keep Fluxer on your server after updates. Say yes and a small hidden helper runs while you are signed in. It sits idle, and when a Fluxer update changes its icons it puts your server back and reopens Fluxer. It is off by default. Uninstall stops it.
+
 ## Uninstall
 
 Double-click `Fluxer Instance Setup.bat` and pick **Uninstall**. Fluxer itself is never touched.

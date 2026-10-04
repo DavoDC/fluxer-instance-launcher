@@ -20,6 +20,7 @@ With no action the script shows the status, then a menu (Install, Uninstall, Qui
 |---|---|
 | `launch` | Starts Fluxer with the flag. Refuses if Fluxer already runs on another instance unless `-ForceRestart`. Used by the login entry. |
 | `apply` | Makes each existing Fluxer icon (Start Menu, Desktop, taskbar) pass `--fluxer-app-url=<server>` (replacing any existing one, keeping other arguments), removes shortcuts an earlier version made, sets the `FluxerInstance` Run value, removes Fluxer's own `Fluxer.Fluxer` Run value. Safe to repeat. |
+| `watch` | Opt-in (`watch_updates`). Launches like `launch`, then waits (`FileSystemWatcher`, no polling) on the folders holding Fluxer's icons; after a change settles (5 s) it runs the `apply` logic, closes Fluxer if open on another server and reopens it on yours. Test hook: env `FLI_TEST_WATCH_ONCE=<seconds>` skips the first launch, handles one change or times out, then exits. |
 | `repair` | Same as `apply`, silent when nothing drifted. Runs 15 seconds after each `launch`. |
 | `status` | Prints a plain summary, then dot points. Exit 0 if all is well, 1 otherwise. |
 | `uninstall` | Takes only the `--fluxer-app-url` argument off the Fluxer icons and removes the Run value. |
@@ -34,7 +35,8 @@ Settings live in `config/config.json` (gitignored). If it is missing the script 
 | `autostart` | `true` | Open Fluxer on your instance at login. |
 | `autostart_delay_seconds` | `15` | Wait before the login launch. |
 | `repair_after_launch_seconds` | `15` | Run `repair` this long after `launch`; `0` turns it off. |
+| `watch_updates` | `false` | When true the sign-in Run value runs `watch` (hidden) instead of `launch`. The menu Install asks once (not with `-Yes` or `apply`) and saves the answer here. Uninstall also stops a running watcher of this script. |
 
 Tests: `Invoke-Pester tests` (Windows PowerShell 5.1, Pester 3) and `python -m pytest tests`. The menu tests feed keys through the `FLI_TEST_KEYS` environment variable.
 
-Update test result (2026-10-04, build 2026.1003.155758): after Fluxer's in-app update, the Start Menu and taskbar icons had lost `--fluxer-app-url` (the updater recreates them), status reported both as opening the official server, and the app auto-restarted on the official server. So an update always needs a re-Install; an automatic re-apply is a backlog item. Old settings files that still contain `shortcut_name` keep working; the key is ignored.
+Update test result (2026-10-04, build 2026.1003.155758): after Fluxer's in-app update, the Start Menu and taskbar icons had lost `--fluxer-app-url` (the updater recreates them), status reported both as opening the official server, and the app auto-restarted on the official server. So an update always needs a re-Install; the opt-in `watch` action is the automatic re-apply; its behaviour against a real Velopack rewrite is unverified. Old settings files that still contain `shortcut_name` keep working; the key is ignored.

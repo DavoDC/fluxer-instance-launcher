@@ -592,3 +592,165 @@ Describe 'menu log does not repeat an unchanged status' {
     It 'still logs the menu choice' { $log | Should Match 'menu: choice Quit' }
     Remove-Sandbox $sb
 }
+
+# ---------- optional update watcher ----------
+function Set-WatchConfig($sb, $watch) {
+    $cfg = [ordered]@{ instance_url = 'https://chat.example.com'; autostart = $true; autostart_delay_seconds = 15; extra_key = 'keep-me' }
+    if ($null -ne $watch) { $cfg['watch_updates'] = $watch }
+    ($cfg | ConvertTo-Json) | Set-Content -Path $sb.Config -Encoding UTF8
+}
+function Get-ConfigJson($sb) { Get-Content -Raw $sb.Config | ConvertFrom-Json }
+
+Describe 'watch_updates config' {
+    $sb = New-Sandbox
+    $r = Invoke-Launcher $sb 'apply'
+    It 'is false in the embedded template and in config.example.json' {
+        (Get-ConfigJson $sb).watch_updates | Should Be $false
+        (Get-Content -Raw (Join-Path $repo 'config\config.example.json') | ConvertFrom-Json).watch_updates | Should Be $false
+    }
+    Remove-Sandbox $sb
+}
+
+Describe 'Run value form for watch off and on' {
+    $sb = New-Sandbox
+    Set-WatchConfig $sb $false
+    New-FluxerIcons $sb
+    Invoke-Launcher $sb 'apply' | Out-Null
+    $off = Get-RunValue $sb 'FluxerInstance'
+    Set-WatchConfig $sb $true
+    Invoke-Launcher $sb 'apply' | Out-Null
+    $on = Get-RunValue $sb 'FluxerInstance'
+    It 'off runs launch, hidden' {
+        $off | Should Match '-WindowStyle Hidden'
+        $off | Should Match 'fluxer-instance-launcher\.ps1" launch -DelaySeconds 15'
+    }
+    It 'on runs watch, hidden' {
+        $on | Should Match '-WindowStyle Hidden'
+        $on | Should Match 'fluxer-instance-launcher\.ps1" watch -DelaySeconds 15'
+    }
+    Remove-Sandbox $sb
+}
+
+Describe 'status lines for the update watcher' {
+    $sb = New-Sandbox
+    Set-WatchConfig $sb $false
+    New-FluxerIcons $sb
+    Invoke-Launcher $sb 'apply' | Out-Null
+    It 'shows no watcher line when it is off' {
+        (Invoke-Launcher $sb 'status').Out | Should Not Match 'Update watcher'
+    }
+    It 'is bad when on in settings but the Run value is the plain form' {
+        Set-WatchConfig $sb $true
+        $r = Invoke-Launcher $sb 'status'
+        $r.Code | Should Be 1
+        $r.Out | Should Match 'Update watcher: on in your settings, but not set up'
+    }
+    It 'is good once applied' {
+        Invoke-Launcher $sb 'apply' | Out-Null
+        $r = Invoke-Launcher $sb 'status'
+        $r.Code | Should Be 0
+        $r.Out | Should Match '  - Update watcher: on, so updates will not undo your server\.'
+    }
+    Remove-Sandbox $sb
+}
+
+Describe 'install question for the update watcher' {
+    $sb = New-Sandbox
+    Set-WatchConfig $sb $null
+    New-FluxerIcons $sb
+    It 'is not asked when the menu Install is cancelled' {
+        $r = Invoke-Menu $sb 'Enter,N,Y'
+        $r.Out | Should Not Match 'background helper'
+        (Get-ConfigJson $sb).PSObject.Properties['watch_updates'] | Should BeNullOrEmpty
+    }
+    It 'is asked after Y, on its own after a blank line, and N writes false keeping other keys' {
+        $r = Invoke-Menu $sb 'Enter,Y,N'
+        $r.Out | Should Match '(?m)^\s*\r?\nKeep Fluxer on your server after updates\? It uses a small background helper\. \(y/n\)'
+        $c = Get-ConfigJson $sb
+        $c.watch_updates | Should Be $false
+        $c.extra_key | Should Be 'keep-me'
+        $c.instance_url | Should Be 'https://chat.example.com'
+        $r.Out | Should Match 'saved your update choice'
+        (Get-RunValue $sb 'FluxerInstance') | Should Match ' launch '
+    }
+    It 'Y writes true and installs the watch form' {
+        $r = Invoke-Menu $sb 'Enter,Y,Y'
+        (Get-ConfigJson $sb).watch_updates | Should Be $true
+        (Get-RunValue $sb 'FluxerInstance') | Should Match ' watch '
+    }
+    It 'is not asked with -Yes, and keeps the config value' {
+        $r = Invoke-Menu $sb 'Enter' @('-Yes')
+        $r.Out | Should Not Match 'background helper'
+        (Get-ConfigJson $sb).watch_updates | Should Be $true
+    }
+    It 'is not asked by the apply action' {
+        $r = Invoke-Launcher $sb 'apply'
+        $r.Out | Should Not Match 'background helper'
+    }
+    Remove-Sandbox $sb
+}
+
+Describe 'watch action' {
+    $sb = New-Sandbox
+    Set-WatchConfig $sb $true
+    New-FluxerIcons $sb
+    It 'dry run only says what it would do' {
+        $r = Invoke-Launcher $sb 'watch' @('-DryRun')
+        $r.Code | Should Be 0
+        $r.Out | Should Match '--fluxer-app-url=https://chat\.example\.com'
+        $r.Out | Should Match 'would'
+    }
+    It 'with the test hook and no change it times out cleanly' {
+        $env:FLI_TEST_WATCH_ONCE = '2'
+        try { $r = Invoke-Launcher $sb 'watch' } finally { Remove-Item Env:\FLI_TEST_WATCH_ONCE -ErrorAction SilentlyContinue }
+        $r.Code | Should Be 0
+        (Get-LnkArgs $sb.Start).Args | Should Be ''
+    }
+    It 'patches an icon an update rewrote and tries to close Fluxer on another server' {
+        $env:FLI_TEST_WATCH_ONCE = '40'
+        try {
+            $a = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $script:Ps1), 'watch', '-ConfigPath', ('"{0}"' -f $sb.Config), '-Root', ('"{0}"' -f $sb.Dir),
+                '-RegistryBase', $sb.Reg, '-FluxerExe', ('"{0}"' -f $sb.Exe), '-LogDir', ('"{0}"' -f $sb.LogDir))
+            $p = Start-Process -FilePath powershell.exe -ArgumentList $a -WindowStyle Hidden -PassThru
+        } finally { Remove-Item Env:\FLI_TEST_WATCH_ONCE -ErrorAction SilentlyContinue }
+        $ready = $false
+        $log = $null
+        for ($i = 0; $i -lt 60 -and -not $ready; $i++) {
+            Start-Sleep -Milliseconds 500
+            $log = Get-ChildItem $sb.LogDir -Filter '*_watch*.log' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime | Select-Object -Last 1
+            if ($log -and ((Get-Content -Raw $log.FullName) -match 'watch: waiting')) { $ready = $true }
+        }
+        $ready | Should Be $true
+        New-Lnk $sb.Start $sb.Exe '' (Split-Path -Parent $sb.Exe)
+        $p.WaitForExit(60000) | Should Be $true
+        $p.ExitCode | Should Be 0
+        (Get-LnkArgs $sb.Start).Args | Should Be $script:Flag
+        $text = Get-Content -Raw $log.FullName
+        $text | Should Match 'watch: icon change seen'
+        $text | Should Match 'close: no Fluxer process open on another server'
+    }
+    Remove-Sandbox $sb
+}
+
+Describe 'uninstall stops only the watcher of this script' {
+    $sb = New-Sandbox
+    Set-WatchConfig $sb $true
+    New-FluxerIcons $sb
+    $copy = Join-Path $sb.Dir 'copy\fluxer-instance-launcher.ps1'
+    New-Item -ItemType Directory -Path (Split-Path -Parent $copy) -Force | Out-Null
+    Copy-Item $script:Ps1 $copy
+    # decoys: one that looks like this script's watcher, one bystander
+    $mine = Start-Process powershell.exe -ArgumentList '-NoProfile', '-Command', "Start-Sleep -Seconds 120 # $copy watch" -WindowStyle Hidden -PassThru
+    $other = Start-Process powershell.exe -ArgumentList '-NoProfile', '-Command', 'Start-Sleep -Seconds 120 # unrelated' -WindowStyle Hidden -PassThru
+    Start-Sleep -Seconds 2
+    $out = & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $copy uninstall -ConfigPath $sb.Config -Root $sb.Dir -RegistryBase $sb.Reg -FluxerExe $sb.Exe -LogDir $sb.LogDir 2>&1 | Out-String
+    Start-Sleep -Seconds 1
+    It 'stops the matching helper, leaves other processes, and says so in plain words' {
+        $mine.HasExited | Should Be $true
+        $other.HasExited | Should Be $false
+        $out | Should Match 'stopped the background update helper'
+    }
+    if (-not $other.HasExited) { Stop-Process -Id $other.Id -Force }
+    if (-not $mine.HasExited) { Stop-Process -Id $mine.Id -Force }
+    Remove-Sandbox $sb
+}
