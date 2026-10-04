@@ -14,16 +14,12 @@ Makes the Fluxer desktop app open on a self-hosted server instead of the officia
 2. Close Fluxer completely: right-click its tray icon and pick **Quit Fluxer**.
 3. Download this repo (green **<> Code** button, then **Download ZIP**) and unzip it.
 4. Open the `scripts` folder and double-click `Fluxer Instance Setup.bat`.
-5. The first time, it makes a settings file and shows where it is.
-   - Check the file has the server you want.
+5. The first run makes a settings file. Check it has the server you want.
    - The default is https://chat.codered.lol.
-6. Double-click `Fluxer Instance Setup.bat` again.
-   - Pick **Install** with the arrow keys.
-   - Press Enter, then press Y.
+6. Double-click `Fluxer Instance Setup.bat` again, then pick **Install**.
 7. Open Fluxer from its normal Start Menu or taskbar icon.
-   - It opens on your server.
-   - It also opens on your server when you sign in to Windows.
-   - The setup adds no icons. It only changes the ones Fluxer already has.
+   - It opens on your server, also when you sign in to Windows.
+   - The setup adds no icons. It only changes Fluxer's own.
 
 ## Check that it works
 
