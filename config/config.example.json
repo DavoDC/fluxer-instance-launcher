@@ -1,5 +1,8 @@
 {
   "instance_url": "https://chat.codered.lol",
   "autostart": true,
-  "autostart_delay_seconds": 15
+  "autostart_delay_seconds": 15,
+  "handler_patch": false,
+  "shortcut_name": "Fluxer (my instance)",
+  "repair_after_launch_seconds": 15
 }
