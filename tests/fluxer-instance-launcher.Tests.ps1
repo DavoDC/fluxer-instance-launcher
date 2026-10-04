@@ -258,24 +258,25 @@ Describe 'status' {
     It 'exits 1 before apply, leads with the summary and names the problems in plain words' {
         $before.Code | Should Be 1
         $before.Out.TrimStart() | Should Match '^Something needs fixing\. Pick Install and it will be put right\.'
-        $before.Out | Should Match '  - The Start Menu Fluxer icon opens the official server\.'
-        $before.Out | Should Match '  - The taskbar Fluxer icon opens the official server\.'
+        $before.Out | Should Match '  - Start Menu icon: opens the official server\.'
+        $before.Out | Should Match '  - Taskbar icon: opens the official server\.'
         $before.Out | Should Match 'sign in to Windows'
         $before.Out | Should Not Match '\[good\]|\[problem\]|your address'
     }
     It 'exits 0 after apply with the exact good wording, listing only icons that exist' {
         $after.Code | Should Be 0
         $after.Out | Should Match 'Everything is working\. Fluxer opens on your self-hosted server \(https://chat\.example\.com\)\.'
-        $after.Out | Should Match '  - The Start Menu and taskbar Fluxer icons use your server\.'
-        $after.Out | Should Match '  - Fluxer opens on your server when you sign in to Windows\.'
-        $after.Out | Should Match '  - Fluxer is not starting itself on the official server\.'
-        $after.Out | Should Not Match 'Desktop'
+        $after.Out | Should Match '  - Start Menu icon: opens your server\.'
+        $after.Out | Should Match '  - Sign-in start: Fluxer opens on your server when you sign in to Windows\.'
+        $after.Out | Should Match '  - Fluxer''s own sign-in start: off'
+        $after.Out | Should Match '  - Desktop icon: not there, nothing to change\.'
+        $after.Out | Should Match 'no scheduled tasks'
     }
     It 'exits 1 if Fluxer re-added its own autostart' {
         Set-FluxerOwnRun $sb
         $r = Invoke-Launcher $sb 'status'
         $r.Code | Should Be 1
-        $r.Out | Should Match 'start itself on the official server'
+        $r.Out | Should Match 'own sign-in start: on'
     }
     It 'exits 1 if an icon was rewritten by a Fluxer update and lost the flag' {
         Remove-Item (Join-Path $sb.Reg 'Microsoft\Windows\CurrentVersion\Run') -Recurse -Force
@@ -283,11 +284,11 @@ Describe 'status' {
         New-Lnk $sb.Start $sb.Exe ''
         $r = Invoke-Launcher $sb 'status'
         $r.Code | Should Be 1
-        $r.Out | Should Match 'The Start Menu Fluxer icon opens the official server'
+        $r.Out | Should Match 'Start Menu icon: opens the official server'
     }
     It 'says a different server when the flag points elsewhere' {
         New-Lnk $sb.Start $sb.Exe '--fluxer-app-url=https://other.example'
-        (Invoke-Launcher $sb 'status').Out | Should Match 'The Start Menu Fluxer icon opens a different server'
+        (Invoke-Launcher $sb 'status').Out | Should Match 'Start Menu icon: opens a different server'
     }
     Remove-Sandbox $sb
 }

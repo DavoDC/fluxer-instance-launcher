@@ -250,6 +250,7 @@ function Sync-Entries($cfg, $loc, [bool]$Quiet) {
 }
 
 # ---------- status ----------
+function Get-Cap([string]$t) { $t.Substring(0,1).ToUpper() + $t.Substring(1) }
 function Join-Names([string[]]$Names) {
     if ($Names.Count -le 1) { return ($Names -join '') }
     ($Names[0..($Names.Count - 2)] -join ', ') + ' and ' + $Names[-1]
@@ -261,51 +262,61 @@ function Show-StatusPlain($cfg, $loc) {
         Write-Host 'Fluxer is not installed yet. Install Fluxer first, then open this setup again.' -ForegroundColor Red
         return 1
     }
-    $good = New-Object System.Collections.Generic.List[string]
-    $bad = New-Object System.Collections.Generic.List[string]
+    # Every thing this tool touches gets a line: kind is good, bad or note.
+    $lines = New-Object System.Collections.Generic.List[object]
+    $bad = 0
+    function Add-Line([string]$kind, [string]$text) {
+        $lines.Add([pscustomobject]@{ Kind = $kind; Text = $text })
+        if ($kind -eq 'bad') { $script:statusBad++ }
+    }
+    $script:statusBad = 0
 
-    $present = @($loc.Icons | Where-Object { Test-Path $_.Path })
-    $okNames = @()
-    foreach ($icon in $present) {
+    $presentCount = 0
+    foreach ($icon in $loc.Icons) {
+        if (-not (Test-Path $icon.Path)) {
+            Add-Line 'note' "$(Get-Cap $icon.Name) icon: not there, nothing to change."
+            continue
+        }
+        $presentCount++
         switch (Get-FlagState (Get-LnkArguments $icon.Path) $cfg.Url) {
-            'ok'       { $okNames += $icon.Name }
-            'official' { $bad.Add("The $($icon.Name) Fluxer icon opens the official server.") }
-            default    { $bad.Add("The $($icon.Name) Fluxer icon opens a different server.") }
+            'ok'       { Add-Line 'good' "$(Get-Cap $icon.Name) icon: opens your server." }
+            'official' { Add-Line 'bad' "$(Get-Cap $icon.Name) icon: opens the official server." }
+            default    { Add-Line 'bad' "$(Get-Cap $icon.Name) icon: opens a different server." }
         }
     }
-    if ($present.Count -eq 0) { $bad.Add('No Fluxer icon (Start Menu, Desktop or taskbar) was found. Open Fluxer once so it makes its icons, then pick Install.') }
-    if ($okNames.Count -gt 0) {
-        $verb = if ($okNames.Count -eq 1) { "The $(Join-Names $okNames) Fluxer icon uses your server." } else { "The $(Join-Names $okNames) Fluxer icons use your server." }
-        $good.Add($verb)
-    }
+    if ($presentCount -eq 0) { Add-Line 'bad' 'No Fluxer icon (Start Menu, Desktop or taskbar) was found. Open Fluxer once so it makes its icons, then pick Install.' }
 
     $runNow = Get-RegValue $loc.RunKey $RunValueName
     if ($cfg.Autostart) {
-        if ($runNow -eq (Get-ExpectedRunValue $cfg)) { $good.Add('Fluxer opens on your server when you sign in to Windows.') }
-        else { $bad.Add('Fluxer is not set to open on your server when you sign in to Windows.') }
+        if ($runNow -eq (Get-ExpectedRunValue $cfg)) { Add-Line 'good' 'Sign-in start: Fluxer opens on your server when you sign in to Windows.' }
+        else { Add-Line 'bad' 'Sign-in start: not set up, so Fluxer will not open on your server when you sign in to Windows.' }
     } else {
-        if ($null -eq $runNow) { $good.Add('Fluxer does not open when you sign in to Windows (switched off in your settings).') }
-        else { $bad.Add('Opening at sign-in is switched off in your settings, but it is still on.') }
+        if ($null -eq $runNow) { Add-Line 'note' 'Sign-in start: off, as set in your settings.' }
+        else { Add-Line 'bad' 'Sign-in start: switched off in your settings, but still on.' }
     }
-    if ($null -eq (Get-RegValue $loc.RunKey $FluxerRunValueName)) { $good.Add('Fluxer is not starting itself on the official server.') }
-    else { $bad.Add('Fluxer is set to start itself on the official server.') }
+    if ($null -eq (Get-RegValue $loc.RunKey $FluxerRunValueName)) { Add-Line 'good' "Fluxer's own sign-in start: off, so it will not open on the official server." }
+    else { Add-Line 'bad' "Fluxer's own sign-in start: on, so Fluxer will open on the official server when you sign in to Windows." }
 
     if ($cfg.HandlerPatch) {
         $hNow = Get-RegValue $loc.HandlerKey '(default)'
-        if ($null -ne $hNow -and $hNow -notmatch [regex]::Escape("--fluxer-app-url=$($cfg.Url)")) { $bad.Add('Links that open Fluxer (fluxer://) do not use your server.') }
-    }
-    if (@($loc.Legacy | Where-Object { Test-LegacyOwn $_ }).Count -gt 0) { $bad.Add('An old "Fluxer (my instance)" icon from an earlier version is still there.') }
-
-    if ($bad.Count -eq 0) {
-        Write-Host "Everything is working. Fluxer opens on your self-hosted server ($($cfg.Url))." -ForegroundColor Green
-        foreach ($g in $good) { Write-Host "  - $g" }
+        if ($null -ne $hNow -and $hNow -notmatch [regex]::Escape("--fluxer-app-url=$($cfg.Url)")) { Add-Line 'bad' 'fluxer:// links: do not use your server.' }
+        else { Add-Line 'good' 'fluxer:// links: open on your server.' }
     } else {
-        Write-Host 'Something needs fixing. Pick Install and it will be put right.' -ForegroundColor Red
-        foreach ($b in $bad) { Write-Host "  - $b" -ForegroundColor Red }
+        Add-Line 'note' 'fluxer:// links: left as Fluxer set them.'
     }
-    return $bad.Count
-}
+    if (@($loc.Legacy | Where-Object { Test-LegacyOwn $_ }).Count -gt 0) { Add-Line 'bad' 'Old shortcut made by an earlier version of this setup: still there.' }
+    else { Add-Line 'good' 'Old shortcut made by an earlier version of this setup: none.' }
+    Add-Line 'note' 'Nothing else is changed: no scheduled tasks, services or admin rights.'
 
+    $bad = $script:statusBad
+    if ($bad -eq 0) { Write-Host "Everything is working. Fluxer opens on your self-hosted server ($($cfg.Url))." -ForegroundColor Green }
+    else { Write-Host 'Something needs fixing. Pick Install and it will be put right.' -ForegroundColor Red }
+    foreach ($l in $lines) {
+        $color = switch ($l.Kind) { 'good' { 'Green' } 'bad' { 'Red' } default { 'DarkGray' } }
+        Write-Host "  - $($l.Text)" -ForegroundColor $color
+    }
+    return $bad
+}
 # ---------- launch ----------
 function Get-MainFluxerProcess {
     try {
