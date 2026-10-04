@@ -9,7 +9,7 @@ It starts the official Fluxer app with one extra setting: which server to open. 
 - It makes its own shortcut and its own start-at-login entry, named `FluxerInstance`.
 - It switches off Fluxer's own start-at-login entry, so the two do not fight.
 - It needs no administrator rights, makes no network connections, and never reads or stores passwords or tokens.
-- It installs no background service. `uninstall` removes everything it made.
+- It installs no background service. Pick Uninstall in the setup menu and everything it made is removed.
 - The `fluxer://` link handler is only touched if you switch that on, and it is off by default.
 
 You do not have to take my word for it. The script is short and readable, and you can check the result in a minute:
@@ -17,7 +17,7 @@ You do not have to take my word for it. The script is short and readable, and yo
 1. Open `scripts/fluxer-instance-launcher.ps1`. Search it for `Invoke-WebRequest`, `WebClient`, `iex` or `FromBase64String`. There are none.
 2. Right-click the shortcut, choose Properties, and read the Target.
 3. Run `Get-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Run` and look at the `FluxerInstance` line.
-4. Run `scripts\run.bat status` any time to see every entry and whether it is in place.
+4. Double-click `scripts\Fluxer Instance Setup.bat` and pick Status any time to see every entry and whether it is in place.
 
 ## The one decision: do you trust the server's owner?
 
@@ -48,7 +48,7 @@ I read Fluxer's source code and checked an installed copy, but did not test ever
 
 - Whether a crafted `fluxer://` link can add extra options when Fluxer is closed. This would affect every Fluxer user with or without this tool, which is why the handler option is off by default.
 - Whether the web client escapes all chat content.
-- Whether the launcher's shortcut and start-up entry survive a real Fluxer update. The README lists how to test it.
+- Whether the launcher's shortcut and start-up entry survive a real Fluxer update. The README's developer section says what is still to test.
 
 ## Reporting
 

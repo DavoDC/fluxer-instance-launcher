@@ -1,6 +1,6 @@
 @echo off
-rem Thin launcher for fluxer-instance-launcher.ps1. Usage: run.bat [--no-pause] [action] [options]
-rem Actions: launch (default), apply, repair, status, uninstall. Exits with the ps1 exit code.
+rem Thin launcher for fluxer-instance-launcher.ps1. Double-click it: with no arguments it opens the menu.
+rem Claude and tests: Fluxer Instance Setup.bat [--no-pause] [action] [options]. Exits with the ps1 exit code.
 set "HERE=%~dp0"
 set "NOPAUSE=0"
 set "ARGS="

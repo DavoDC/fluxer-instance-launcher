@@ -2,63 +2,50 @@
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/G2G31WKOCN)
 
-Starts the official Fluxer desktop app on a self-hosted instance, and keeps it there after updates and restarts. A small PowerShell script, no extra app to install. Windows only. Unofficial, not affiliated with the Fluxer project.
+Makes the Fluxer desktop app open on a self-hosted server instead of the official one, and keeps it that way. Windows only. Unofficial, not affiliated with the Fluxer project. Is it safe? See [SECURITY.md](SECURITY.md).
 
-Status: built and tested against a throwaway registry key and folder; the real before and after Fluxer update test is still to do (steps below).
+## How to use it
 
-## Why
+1. Install Fluxer as normal, then close it completely (the tray icon too).
+2. Double-click `Fluxer Instance Setup.bat` (in the `scripts` folder). The first time, it creates a settings file and tells you where it is. Open that file, check the server address (the default is https://chat.codered.lol), save it, then double-click the setup file again. Use the arrow keys to pick **Install** and press Enter, then press Y.
+3. Open Fluxer from the new **Fluxer (my instance)** shortcut on your Desktop or in the Start Menu. It also opens that way when you sign in to Windows.
 
-The official Fluxer app has no instance picker. The only way to open it on another server is the launch flag `--fluxer-app-url=<instance>`, which Fluxer never saves, so every restart and update puts you back on the official server. This launcher uses that flag for you and re-creates its own entries when they drift. Similar tools exist (`omgitsyasir/fluxer-desktop-instance-swapper`, a Tauri app; `gogy-no-one/gogys-fluxer`, an Electron wrapper; `nfb04/fluxer-desktop-app-multi-instance`, a modified client); this one keeps the unmodified official app and focuses on surviving updates. Is it safe? See [SECURITY.md](SECURITY.md).
+To remove everything, double-click `Fluxer Instance Setup.bat` and pick **Uninstall**. Fluxer itself is never touched.
 
-## Quick start
+If something looks wrong, pick **Status**. It says in plain words what is in place and what is not, and **Install** puts it right.
 
-1. Install Fluxer as normal, then quit it fully (tray icon too).
-2. Copy `config/config.example.json` to `config/config.json` and set `instance_url` (default: the public instance https://chat.codered.lol).
-3. Run `scripts\run.bat apply`. It creates a shortcut called "Fluxer (my instance)" on your Desktop and in the Start Menu, and a start-at-login entry.
-4. From now on open Fluxer from that shortcut, or let it start at login.
+After a Fluxer update the app may open on the official server once. Close it and use the shortcut again.
 
-## Actions
+## For developers
 
-Run `scripts\run.bat <action>` (add `--no-pause` to close the window when done), or call `scripts\fluxer-instance-launcher.ps1 <action>` directly.
+PowerShell 5.1 script `scripts/fluxer-instance-launcher.ps1`, started by the thin `scripts/Fluxer Instance Setup.bat`. Fluxer has no instance picker; the only way is the launch flag `--fluxer-app-url=<instance>`, which it never saves. Similar tools exist (`omgitsyasir/fluxer-desktop-instance-swapper`, `gogy-no-one/gogys-fluxer`, `nfb04/fluxer-desktop-app-multi-instance`); this one keeps the unmodified official app and focuses on surviving updates.
+
+With no action the script opens the menu (Install, Uninstall, Status). With an action it runs without any menu, which is what tests and Claude use:
 
 | Action | What it does |
 |---|---|
-| `launch` | Starts Fluxer with the flag (default). If Fluxer is already running on another instance it says so; quit it first, or add `-ForceRestart`. |
-| `apply` | Creates or fixes the shortcuts and the `FluxerInstance` start-at-login entry, and removes Fluxer's own `Fluxer.Fluxer` entry. Safe to run repeatedly. |
-| `repair` | Same as `apply`, silent when nothing has drifted. Runs by itself 15 seconds after each `launch`. |
-| `status` | Lists every entry as OK, MISSING or DRIFT. Exit code 0 if all is well, 1 otherwise. |
-| `uninstall` | Removes everything the launcher created and restores the stock `fluxer://` handler if it was patched. |
+| `launch` | Starts Fluxer with the flag. Refuses if Fluxer already runs on another instance unless `-ForceRestart`. Used by the shortcut and the login entry. |
+| `apply` | Creates or fixes the shortcuts and the `FluxerInstance` Run value, removes Fluxer's own `Fluxer.Fluxer` Run value. Safe to repeat. |
+| `repair` | Same as `apply`, silent when nothing drifted. Runs 15 seconds after each `launch`. |
+| `status` | Lists each entry as OK, MISSING or DRIFT. Exit 0 if all is well, 1 otherwise. |
+| `uninstall` | Removes everything the launcher made and restores the stock `fluxer://` handler if it was patched. |
 
-Options: `-DryRun` prints what would change and changes nothing; `-AllowInsecure` permits an `http://` address (refused otherwise); `-ConfigPath`, `-Root` and `-RegistryBase` redirect config, shortcuts and registry writes elsewhere (the tests use these so they never touch your real setup).
+Options: `-DryRun` prints instead of changing; `-Yes` skips the menu's confirmation; `-AllowInsecure` permits `http://`; `-ConfigPath`, `-Root` and `-RegistryBase` redirect config, shortcuts and registry writes (the tests use these on a throwaway key and folder). Exit codes: 0 ok, 1 status problem, 2 error, 3 settings file just created (or Fluxer running elsewhere on `launch`).
 
-## Config
-
-`config/config.json` (gitignored), falling back to `config/config.example.json`.
+Settings live in `config/config.json` (gitignored). If it is missing the script creates it from a template built into the script; `config/config.example.json` is documentation only and no code reads it.
 
 | Key | Default | Meaning |
 |---|---|---|
 | `instance_url` | `https://chat.codered.lol` | The server to open. Must be `https://`. |
-| `autostart` | `true` | Start Fluxer on your instance at login. |
-| `autostart_delay_seconds` | `15` | Wait before the login launch, so it does not race the desktop. |
-| `handler_patch` | `false` | Opt in to also rewrite the `fluxer://` link handler. Fluxer rewrites it back on every launch, so it only helps until then. |
+| `autostart` | `true` | Open Fluxer on your instance at login. |
+| `autostart_delay_seconds` | `15` | Wait before the login launch. |
+| `handler_patch` | `false` | Opt in to rewriting the `fluxer://` handler (Fluxer rewrites it back on every launch). |
 | `shortcut_name` | `Fluxer (my instance)` | Name of the shortcut the launcher owns. |
 | `repair_after_launch_seconds` | `15` | Run `repair` this long after `launch`; `0` turns it off. |
 
-## Limits
+Tests: `Invoke-Pester tests` (Windows PowerShell 5.1, Pester 3) and `python -m pytest tests`. The menu tests feed keys through the `FLI_TEST_KEYS` environment variable.
 
-- After a Fluxer update restarts the app, it opens on the official server (Fluxer restarts without the flag). Close it and use the shortcut.
-- No administrator rights, no network access, no stored secrets. `uninstall` removes everything.
-
-## Tests
-
-`Invoke-Pester tests` (Windows PowerShell 5.1, built-in Pester 3) and `python -m pytest tests` (repo guard test). All Pester tests run against a throwaway folder and registry key.
-
-## Update test (still to do on a real install)
-
-1. `scripts\run.bat --no-pause apply`, then `status`: expect all OK.
-2. Reboot, check Fluxer opened on your instance, `status` again.
-3. Let Fluxer apply a pending update (or accept its update prompt), then run `status`.
-4. Note which entries survived. Entries reported DRIFT or MISSING are fixed by `repair`; record the result here.
+Still to do: a real before and after Fluxer update test (apply, status, reboot, let Fluxer update, status again, and record which entries survived).
 
 ## Licence
 

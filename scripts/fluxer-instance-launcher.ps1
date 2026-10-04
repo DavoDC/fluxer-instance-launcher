@@ -2,8 +2,10 @@
 .SYNOPSIS
   Starts the official Fluxer desktop app on your chosen instance and keeps it there after Fluxer updates.
 .DESCRIPTION
-  Actions: launch (default), apply, repair, status, uninstall. See README.md.
-  Reads config\config.json (falls back to config\config.example.json). No network, no admin rights.
+  With no action it opens an arrow-key menu (Install, Uninstall, Status) for people.
+  Actions for scripts and tests: launch, apply, repair, status, uninstall. See README.md.
+  Reads config\config.json; if it is missing, creates it from a template built into this script and exits 3.
+  No network, no admin rights.
   Writes only: the HKCU Run value FluxerInstance, its own shortcuts, and (opt-in) the fluxer:// handler.
   Test and safety parameters: -Root redirects Desktop, Start Menu and LocalAppData into a folder,
   -RegistryBase redirects the registry writes to another key, -DryRun prints instead of changing anything.
@@ -15,8 +17,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('launch', 'apply', 'repair', 'status', 'uninstall')]
-    [string]$Action = 'launch',
+    [ValidateSet('', 'launch', 'apply', 'repair', 'status', 'uninstall')]
+    [string]$Action = '',
     [string]$ConfigPath,
     [string]$Root,
     [string]$RegistryBase = 'HKCU:\Software',
@@ -24,7 +26,8 @@ param(
     [int]$DelaySeconds = 0,
     [switch]$DryRun,
     [switch]$AllowInsecure,
-    [switch]$ForceRestart
+    [switch]$ForceRestart,
+    [switch]$Yes
 )
 
 $ErrorActionPreference = 'Stop'
@@ -40,12 +43,30 @@ function Stop-WithError([string]$Message) {
 }
 
 # ---------- config ----------
+$DefaultConfigJson = @'
+{
+  "instance_url": "https://chat.codered.lol",
+  "autostart": true,
+  "autostart_delay_seconds": 15,
+  "handler_patch": false,
+  "shortcut_name": "Fluxer (my instance)",
+  "repair_after_launch_seconds": 15
+}
+'@
+
 function Get-Config {
     if (-not $ConfigPath) { $script:ConfigPath = Join-Path $PSScriptRoot '..\config\config.json' }
     $path = $ConfigPath
     if (-not (Test-Path $path)) {
-        $path = Join-Path (Split-Path -Parent $ConfigPath) 'config.example.json'
-        if (-not (Test-Path $path)) { Stop-WithError "No config found at $ConfigPath or $path" }
+        $full = [System.IO.Path]::GetFullPath($path)
+        if ($DryRun) {
+            Write-Host "[dry-run] would create your settings file at $full (it does not exist yet)"
+        } else {
+            New-Item -ItemType Directory -Path (Split-Path -Parent $full) -Force | Out-Null
+            Set-Content -Path $full -Value $DefaultConfigJson -Encoding UTF8
+            Write-Host "Created your settings file at $full. Open it, check the instance address, save, then run this again."
+        }
+        exit 3
     }
     try { $c = Get-Content -Raw -Path $path | ConvertFrom-Json } catch { Stop-WithError "Config is not valid JSON: $path" }
     Write-Host "Config: $path"
@@ -278,8 +299,121 @@ function Remove-Entries($cfg, $loc) {
     Write-Host 'Uninstall done. Fluxer itself is untouched; turn its own autostart on in its settings if you want it.'
 }
 
+# ---------- menu (for people; scripts and tests pass an action instead) ----------
+$MenuItems = @('Install', 'Uninstall', 'Status')
+
+# Reads one key code. FLI_TEST_KEYS (comma list of Up, Down, Enter, Esc, Y, N) replaces the keyboard in tests.
+function Read-KeyCode {
+    if ($null -ne $env:FLI_TEST_KEYS) {
+        if ($null -eq $script:TestKeys) {
+            $script:TestKeys = New-Object System.Collections.Queue
+            foreach ($k in ($env:FLI_TEST_KEYS -split ',')) { if ($k.Trim()) { $script:TestKeys.Enqueue($k.Trim()) } }
+        }
+        if ($script:TestKeys.Count -eq 0) { return 27 }
+        $map = @{ Up = 38; Down = 40; Enter = 13; Esc = 27; Y = 89; N = 78 }
+        return [int]$map[[string]$script:TestKeys.Dequeue()]
+    }
+    return $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown').VirtualKeyCode
+}
+
+# Pure key handling: returns the new selected index, or 'enter' / 'quit'.
+function Step-Menu([int]$Index, [int]$Count, [int]$Key) {
+    switch ($Key) {
+        38 { return (($Index - 1 + $Count) % $Count) }
+        40 { return (($Index + 1) % $Count) }
+        13 { return 'enter' }
+        27 { return 'quit' }
+    }
+    return $Index
+}
+
+function Show-Menu([int]$Index) {
+    try { Clear-Host } catch { }
+    Write-Host 'Fluxer Instance Setup'
+    Write-Host ''
+    Write-Host 'Use the arrow keys, then press Enter. Press Esc to quit.'
+    Write-Host ''
+    for ($i = 0; $i -lt $MenuItems.Count; $i++) {
+        if ($i -eq $Index) { Write-Host ('  > {0}' -f $MenuItems[$i]) -ForegroundColor Cyan } else { Write-Host ('    {0}' -f $MenuItems[$i]) }
+    }
+    Write-Host ''
+}
+
+function Read-Menu {
+    $i = 0
+    while ($true) {
+        Show-Menu $i
+        $r = Step-Menu $i $MenuItems.Count (Read-KeyCode)
+        if ($r -is [string]) { if ($r -eq 'enter') { return $MenuItems[$i] } else { return $null } }
+        $i = [int]$r
+    }
+}
+
+function Confirm-Yes([string]$Question) {
+    if ($Yes) { return $true }
+    Write-Host "$Question (y/n)"
+    while ($true) {
+        $k = Read-KeyCode
+        if ($k -eq 89) { return $true }
+        if ($k -eq 78 -or $k -eq 27) { return $false }
+    }
+}
+
+function Show-StatusPlain($cfg, $loc) {
+    $script:plainBad = 0
+    $say = {
+        param($good, $goodText, $badText)
+        if ($good) { Write-Host "  [good] $goodText" -ForegroundColor Green } else { Write-Host "  [problem] $badText" -ForegroundColor Red; $script:plainBad++ }
+    }
+    Write-Host "Your Fluxer address: $($cfg.Url)"
+    & $say (Test-Path $loc.FluxerExe) 'Fluxer is installed.' 'Fluxer does not seem to be installed yet. Install Fluxer first.'
+    $runNow = Get-RegValue $loc.RunKey $RunValueName
+    if ($cfg.Autostart) { & $say ($runNow -eq (Get-ExpectedRunValue $cfg)) 'Fluxer will open on your address when you sign in to Windows.' 'Fluxer is not set to open on your address at sign-in. Pick Install to fix it.' }
+    else { & $say ($null -eq $runNow) 'Opening at sign-in is switched off in your settings, and it is off.' 'Opening at sign-in is switched off in your settings, but it is still on. Pick Install to fix it.' }
+    & $say ($null -eq (Get-RegValue $loc.RunKey $FluxerRunValueName)) 'Fluxer is not starting itself on the official server.' 'Fluxer is set to start itself on the official server. Pick Install to fix it.'
+    $names = @('Desktop', 'Start Menu')
+    for ($i = 0; $i -lt $loc.Folders.Count; $i++) {
+        $s = Get-ShortcutState (Join-Path $loc.Folders[$i] "$($cfg.ShortcutName).lnk")
+        & $say ($s -eq 'ok') "The $($names[$i]) shortcut `"$($cfg.ShortcutName)`" is in place." "The $($names[$i]) shortcut `"$($cfg.ShortcutName)`" is missing or wrong. Pick Install to fix it."
+    }
+    if ($script:plainBad -eq 0) { Write-Host 'Everything is working.' -ForegroundColor Green } else { Write-Host 'Something needs fixing. Pick Install and it will be put right.' -ForegroundColor Red }
+    return $script:plainBad
+}
+
+function Invoke-Menu($cfg, $loc) {
+    $choice = Read-Menu
+    if ($null -eq $choice) { return 0 }
+    Write-Host ''
+    switch ($choice) {
+        'Install' {
+            Write-Host 'Install will:'
+            Write-Host "  - make Fluxer open on $($cfg.Url)"
+            Write-Host "  - add a shortcut called `"$($cfg.ShortcutName)`" to your Desktop and Start Menu"
+            if ($cfg.Autostart) { Write-Host '  - open Fluxer that way when you sign in to Windows' }
+            Write-Host "  - turn off Fluxer's own start-up entry, so it does not open the official server"
+            Write-Host 'Nothing needs administrator rights, and Uninstall undoes it all.'
+            if (-not (Confirm-Yes 'Go ahead?')) { Write-Host 'Cancelled. Nothing was changed.'; return 0 }
+            Sync-Entries $cfg $loc $false
+            Write-Host "Done. Open Fluxer from the `"$($cfg.ShortcutName)`" shortcut."
+            return 0
+        }
+        'Uninstall' {
+            Write-Host 'Uninstall removes the shortcuts and the sign-in entry this tool made. Fluxer itself is not touched.'
+            if (-not (Confirm-Yes 'Go ahead?')) { Write-Host 'Cancelled. Nothing was changed.'; return 0 }
+            Remove-Entries $cfg $loc
+            return 0
+        }
+        'Status' { if ((Show-StatusPlain $cfg $loc) -gt 0) { return 1 } else { return 0 } }
+    }
+    return 0
+}
+
 # ---------- main ----------
 $script:ChangeCount = 0
+if ($Action -eq '' -and $null -eq $env:FLI_TEST_KEYS -and [Console]::IsInputRedirected) {
+    Write-Host 'Usage: run "Fluxer Instance Setup.bat" with no arguments for the menu, or pass an action: launch, apply, repair, status, uninstall (options: -DryRun, -Yes).'
+    exit 2
+}
 $cfg = Get-Config
 if ($Action -ne 'uninstall') {
     $err = Test-InstanceUrl $cfg.Url
@@ -288,6 +422,10 @@ if ($Action -ne 'uninstall') {
 $loc = Get-Locations
 if ($DryRun) { Write-Host '(dry run: nothing will be changed)' }
 $code = 0
+if ($Action -eq '') {
+    $code = Invoke-Menu $cfg $loc
+    exit $code
+}
 switch ($Action) {
     'apply'     { Sync-Entries $cfg $loc $false }
     'repair'    { Sync-Entries $cfg $loc $true }

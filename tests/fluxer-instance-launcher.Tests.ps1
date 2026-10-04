@@ -5,7 +5,7 @@
 
 $repo = Split-Path -Parent $PSScriptRoot
 $script:Ps1 = Join-Path $repo 'scripts\fluxer-instance-launcher.ps1'
-$script:Bat = Join-Path $repo 'scripts\run.bat'
+$script:Bat = Join-Path $repo 'scripts\Fluxer Instance Setup.bat'
 
 function New-Sandbox {
     $id = [guid]::NewGuid().ToString('N').Substring(0, 8)
@@ -211,17 +211,40 @@ Describe 'URL validation' {
     Remove-Sandbox $sb
 }
 
-Describe 'config fallback' {
+Describe 'missing config is created from the embedded template, never from the example' {
     $sb = New-Sandbox
     $example = Join-Path $sb.Dir 'config.example.json'
-    '{"instance_url":"https://fallback.example.com","autostart":false,"autostart_delay_seconds":5}' | Set-Content -Path $example -Encoding UTF8
-    # config.json does not exist, so the sibling config.example.json must be used.
-    $r = Invoke-Launcher $sb 'launch' @('-DryRun')
-    It 'uses config.example.json when config.json is missing' {
-        $r.Code | Should Be 0
-        $r.Out | Should Match 'fallback\.example\.com'
+    '{"instance_url":"https://fallback.example.com","autostart":false}' | Set-Content -Path $example -Encoding UTF8
+    $r = Invoke-Launcher $sb 'apply'
+    It 'exits 3, prints the path in plain words and writes the default settings' {
+        $r.Code | Should Be 3
+        $r.Out | Should Match 'Created your settings file at'
+        $r.Out | Should Match 'run this again'
+        Test-Path $sb.Config | Should Be $true
+        $c = Get-Content -Raw $sb.Config | ConvertFrom-Json
+        $c.instance_url | Should Be 'https://chat.codered.lol'
+        $c.autostart | Should Be $true
+        $c.autostart_delay_seconds | Should Be 15
+        $c.handler_patch | Should Be $false
+    }
+    It 'changes nothing else on that first run' {
+        Get-RunValue $sb 'FluxerInstance' | Should BeNullOrEmpty
+    }
+    It 'never mentions the fallback URL from the example file' {
+        $r.Out | Should Not Match 'fallback\.example\.com'
+    }
+    It 'uses the created file on the next run' {
+        (Invoke-Launcher $sb 'apply').Code | Should Be 0
+        Get-RunValue $sb 'FluxerInstance' | Should Not BeNullOrEmpty
     }
     Remove-Sandbox $sb
+}
+
+Describe 'config.example.json is documentation only' {
+    It 'no script mentions it, so no code path can read it' {
+        (Get-Content -Raw $script:Ps1) | Should Not Match 'config\.example'
+        (Get-Content -Raw $script:Bat) | Should Not Match 'config\.example'
+    }
 }
 
 Describe 'launch' {
@@ -254,15 +277,96 @@ Describe 'no network code in the launcher' {
     }
 }
 
-Describe 'run.bat' {
+Describe 'Fluxer Instance Setup.bat' {
     $sb = New-Sandbox
     Set-TestConfig $sb
-    $out = & cmd.exe /c "`"$($script:Bat)`" --no-pause status -ConfigPath `"$($sb.Config)`" -Root `"$($sb.Dir)`" -RegistryBase `"$($sb.Reg)`"" 2>&1 | Out-String
+    $out = & $script:Bat --no-pause status -ConfigPath $sb.Config -Root $sb.Dir -RegistryBase $sb.Reg 2>&1 | Out-String
     $code = $LASTEXITCODE
     It 'passes args through, prints a timing banner and returns the ps1 exit code' {
         $code | Should Be 1
-        $out | Should Match 'FluxerInstance'
         $out | Should Match 'Started'
+        $out | Should Match 'Finished'
+    }
+    It 'is named for what it does' {
+        (Split-Path -Leaf $script:Bat) | Should Be 'Fluxer Instance Setup.bat'
+        Test-Path (Join-Path (Split-Path -Parent $script:Bat) 'run.bat') | Should Be $false
+    }
+    Remove-Sandbox $sb
+}
+
+# Menu tests: FLI_TEST_KEYS feeds keys (Up, Down, Enter, Esc, Y, N) instead of the keyboard.
+function Invoke-Menu($sb, [string]$Keys, [string[]]$Extra = @()) {
+    $env:FLI_TEST_KEYS = $Keys
+    try {
+        $args2 = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $script:Ps1,
+            '-ConfigPath', $sb.Config, '-Root', $sb.Dir, '-RegistryBase', $sb.Reg) + $Extra
+        $out = & powershell.exe @args2 2>&1 | Out-String
+        @{ Code = $LASTEXITCODE; Out = $out }
+    } finally { Remove-Item Env:\FLI_TEST_KEYS -ErrorAction SilentlyContinue }
+}
+
+Describe 'menu' {
+    $sb = New-Sandbox
+    Set-TestConfig $sb
+    It 'shows only Install, Uninstall and Status' {
+        $r = Invoke-Menu $sb 'Esc'
+        $r.Code | Should Be 0
+        $r.Out | Should Match 'Install'
+        $r.Out | Should Match 'Uninstall'
+        $r.Out | Should Match 'Status'
+        $r.Out | Should Not Match 'Repair|Launch|Dry'
+    }
+    It 'Esc quits without changing anything' {
+        Get-RunValue $sb 'FluxerInstance' | Should BeNullOrEmpty
+    }
+    It 'Down wraps and Up moves back: Status is reachable with Up from the top' {
+        $r = Invoke-Menu $sb 'Up,Enter'
+        $r.Out | Should Match 'working|problem|Fluxer is'
+        Get-RunValue $sb 'FluxerInstance' | Should BeNullOrEmpty
+    }
+    It 'Install then N cancels and changes nothing' {
+        $r = Invoke-Menu $sb 'Enter,N'
+        $r.Out | Should Match 'Cancelled|cancelled|Nothing was changed'
+        Get-RunValue $sb 'FluxerInstance' | Should BeNullOrEmpty
+    }
+    It 'Install then Y applies' {
+        $r = Invoke-Menu $sb 'Enter,Y'
+        $r.Code | Should Be 0
+        Get-RunValue $sb 'FluxerInstance' | Should Not BeNullOrEmpty
+        @(Get-ChildItem (Join-Path $sb.Dir 'Desktop') -Filter *.lnk).Count | Should Be 1
+    }
+    It 'Status in plain words reports good after install' {
+        $fake = Join-Path $sb.Dir 'Fluxer.exe'
+        'x' | Set-Content $fake
+        $r = Invoke-Menu $sb 'Up,Enter' @('-FluxerExe', $fake)
+        $r.Code | Should Be 0
+        $r.Out | Should Match 'Everything is working'
+    }
+    It 'Uninstall then Y reverses the install' {
+        $r = Invoke-Menu $sb 'Down,Enter,Y'
+        $r.Code | Should Be 0
+        Get-RunValue $sb 'FluxerInstance' | Should BeNullOrEmpty
+        @(Get-ChildItem (Join-Path $sb.Dir 'Desktop') -Filter *.lnk -ErrorAction SilentlyContinue).Count | Should Be 0
+    }
+    It 'Install with -Yes skips the question' {
+        $r = Invoke-Menu $sb 'Enter' @('-Yes')
+        Get-RunValue $sb 'FluxerInstance' | Should Not BeNullOrEmpty
+    }
+    Remove-Sandbox $sb
+}
+
+Describe 'menu is not shown when an action is passed or stdin is redirected' {
+    $sb = New-Sandbox
+    Set-TestConfig $sb
+    It 'an action runs directly even if keys are available' {
+        $env:FLI_TEST_KEYS = 'Esc'
+        try { $r = Invoke-Launcher $sb 'status' } finally { Remove-Item Env:\FLI_TEST_KEYS -ErrorAction SilentlyContinue }
+        $r.Out | Should Not Match 'Use the arrow keys'
+    }
+    It 'no action and redirected stdin prints the usage line instead of hanging' {
+        $out = '' | & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $script:Ps1 -ConfigPath $sb.Config -Root $sb.Dir -RegistryBase $sb.Reg 2>&1 | Out-String
+        $LASTEXITCODE | Should Be 2
+        $out | Should Match 'Usage'
     }
     Remove-Sandbox $sb
 }
