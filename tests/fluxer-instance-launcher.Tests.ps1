@@ -426,6 +426,9 @@ Describe 'Fluxer Instance Setup.bat' {
         $out | Should Match 'Started'
         $out | Should Match 'Finished'
     }
+    It 'keeps a blank line before the Finished line' {
+        $out | Should Match '(?m)^\s*\r?\n\s*Finished '
+    }
     It 'is named for what it does' {
         (Split-Path -Leaf $script:Bat) | Should Be 'Fluxer Instance Setup.bat'
         Test-Path (Join-Path (Split-Path -Parent $script:Bat) 'run.bat') | Should Be $false
@@ -481,7 +484,7 @@ Describe 'menu' {
         Get-RunValue $sb 'FluxerInstance' | Should Not BeNullOrEmpty
         (Get-LnkArgs $sb.Desktop).Args | Should Be $script:Flag
         $r.Out | Should Not Match 'my instance'
-        $r.Out | Should Match '(?m)^  - make the Start Menu Fluxer icon open https://chat\.example\.com'
+        $r.Out | Should Match '(?m)^  - made the Start Menu icon open https://chat\.example\.com'
         $r.Out | Should Match '(?m)^      \w:\\.*Fluxer\.lnk'
         $r.Out | Should Match 'Changes made:'
     }

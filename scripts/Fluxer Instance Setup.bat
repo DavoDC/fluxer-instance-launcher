@@ -14,6 +14,7 @@ goto collect
 echo Started %DATE% %TIME%
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%HERE%fluxer-instance-launcher.ps1"%ARGS%
 set "RC=%ERRORLEVEL%"
+echo.
 echo Finished %DATE% %TIME% (exit %RC%)
 if "%NOPAUSE%"=="1" exit /b %RC%
 echo.

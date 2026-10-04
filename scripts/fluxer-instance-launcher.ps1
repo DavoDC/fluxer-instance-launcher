@@ -191,17 +191,17 @@ function Sync-Entries($cfg, $loc, [bool]$Quiet) {
         $want = Get-ExpectedRunValue $cfg
         if ($runNow -ne $want) {
             # New-Item -Force on an existing key wipes its values, so create only when absent.
-            Invoke-Change "set Run value $RunValueName" { if (-not (Test-Path $loc.RunKey)) { New-Item -Path $loc.RunKey -Force | Out-Null }; Set-ItemProperty -Path $loc.RunKey -Name $RunValueName -Value $want }
+            Invoke-Change "set Run value $RunValueName" { if (-not (Test-Path $loc.RunKey)) { New-Item -Path $loc.RunKey -Force | Out-Null }; Set-ItemProperty -Path $loc.RunKey -Name $RunValueName -Value $want } 'set Fluxer to open on your server when you sign in to Windows'
             $script:ChangeCount++
         }
     } elseif ($null -ne $runNow) {
-        Invoke-Change "remove Run value $RunValueName (autostart is off in config)" { Remove-ItemProperty -Path $loc.RunKey -Name $RunValueName }
+        Invoke-Change "remove Run value $RunValueName (autostart is off in config)" { Remove-ItemProperty -Path $loc.RunKey -Name $RunValueName } 'removed the sign-in start, as your settings say'
         $script:ChangeCount++
     }
 
     # 2. Fluxer's own autostart value would start the official instance
     if ($null -ne (Get-RegValue $loc.RunKey $FluxerRunValueName)) {
-        Invoke-Change "delete Fluxer's own Run value $FluxerRunValueName" { Remove-ItemProperty -Path $loc.RunKey -Name $FluxerRunValueName }
+        Invoke-Change "delete Fluxer's own Run value $FluxerRunValueName" { Remove-ItemProperty -Path $loc.RunKey -Name $FluxerRunValueName } 'turned off Fluxer''s own sign-in start'
         $script:ChangeCount++
     }
 
@@ -212,7 +212,7 @@ function Sync-Entries($cfg, $loc, [bool]$Quiet) {
         if ((Get-FlagState $cur $cfg.Url) -ne 'ok') {
             $want = Set-UrlFlag $cur $cfg.Url
             $lnkPath = $icon.Path
-            Invoke-Change "make the $($icon.Name) Fluxer icon open $($cfg.Url) ($lnkPath)" { Set-LnkArguments $lnkPath $want }
+            Invoke-Change "make the $($icon.Name) Fluxer icon open $($cfg.Url) ($lnkPath)" { Set-LnkArguments $lnkPath $want } "made the $($icon.Name) icon open $($cfg.Url) ($lnkPath)"
             $script:ChangeCount++
         }
     }
@@ -220,7 +220,7 @@ function Sync-Entries($cfg, $loc, [bool]$Quiet) {
     # 3b. shortcuts of an earlier version of this launcher
     foreach ($old in $loc.Legacy) {
         if (Test-LegacyOwn $old) {
-            Invoke-Change "delete the old launcher shortcut $old" { Remove-Item -Path $old -Force }
+            Invoke-Change "delete the old launcher shortcut $old" { Remove-Item -Path $old -Force } "deleted the old shortcut ($old)"
             $script:ChangeCount++
         }
     }
@@ -302,7 +302,7 @@ function Get-FluxerNotOnServer($cfg, $loc) {
 function Stop-FluxerNotOnServer($cfg, $loc) {
     $procs = @(Get-FluxerNotOnServer $cfg $loc)
     if ($procs.Count -eq 0) { return }
-    Invoke-Change 'close Fluxer, which was open on another server' { $procs | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } }
+    Invoke-Change 'close Fluxer, which was open on another server' { $procs | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } } 'closed Fluxer, which was open on another server'
 }
 
 function Get-MainFluxerProcess {
@@ -446,7 +446,7 @@ function Invoke-Menu($cfg, $loc) {
             Sync-Entries $cfg $loc $false
             Stop-FluxerNotOnServer $cfg $loc
             Write-Host ''
-            Write-Host 'Done. Open Fluxer from its normal Start Menu, Desktop or taskbar icon.'
+            Write-Host 'Done. Open Fluxer from its normal Start Menu or taskbar icon.'
             return 0
         }
         'Uninstall' {
