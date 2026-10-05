@@ -39,7 +39,7 @@ Settings live in `config/config.json` (gitignored). If it is missing the script 
 | `autostart` | `true` | Open Fluxer on your instance at login. |
 | `autostart_delay_seconds` | `15` | Wait before the login launch. |
 | `repair_after_launch_seconds` | `15` | Run `repair` this long after `launch`; `0` turns it off. |
-| `watch_updates` | `false` | When true the sign-in Run value runs `watch` (hidden) instead of `launch`. The menu Install asks once (not with `-Yes` or `apply`) and saves the answer here. Uninstall also stops a running watcher of this script. Install and `apply` also start the watcher right away (hidden) when this is true and none of this script is running; env `FLI_TEST_NO_SPAWN=1` logs `would start watcher` instead of starting it. |
+| `watch_updates` | `false` | When true the sign-in Run value runs `watch` instead of `launch`. Both Run forms and the helper start through `conhost.exe --headless powershell.exe` (no window; `-WindowStyle Hidden` alone is ignored under Windows Terminal). The menu Install asks once (not with `-Yes` or `apply`) and saves the answer here. Uninstall also stops a running watcher of this script. Install and `apply` also start the watcher right away (hidden) when this is true and none of this script is running; env `FLI_TEST_NO_SPAWN=1` logs `would start watcher` instead of starting it. |
 
 Tests: `Invoke-Pester tests` (Windows PowerShell 5.1, Pester 3) and `python -m pytest tests`. The menu tests feed keys through the `FLI_TEST_KEYS` environment variable. Tests must never match or stop real processes: process matching in a sandbox (`-Root` or `FLI_TEST_NO_SPAWN=1`) is scoped to the sandbox root, so the user's real watcher is never seen or stopped.
 
