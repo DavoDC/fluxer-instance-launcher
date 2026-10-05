@@ -486,12 +486,32 @@ function Start-WatcherNow($cfg) {
     } 'started the background update helper'
 }
 
+# A watcher killed by logoff, shutdown or Stop-Process cannot log its own end, so the next one reports any older watcher log with no exit line whose pid is gone.
+function Write-PreviousWatcherEnds {
+    try {
+        if (-not $script:LogFile) { return }
+        $dir = Split-Path -Parent $script:LogFile
+        foreach ($f in Get-ChildItem -LiteralPath $dir -Filter '*_watch*.log' -ErrorAction SilentlyContinue) {
+            if ($f.FullName -eq $script:LogFile) { continue }
+            $text = Get-Content -Raw -LiteralPath $f.FullName
+            if ($text -match 'exit code' -or $text -match 'previous watcher') { continue }
+            if ($text -notmatch 'watch: pid (\d+)') { continue }
+            $old = [int]$Matches[1]
+            if (Get-Process -Id $old -ErrorAction SilentlyContinue) { continue }
+            Write-Log "watch: previous watcher (pid $old, log $($f.Name)) ended without an exit line: killed, logoff or shutdown"
+            [System.IO.File]::AppendAllText($f.FullName, ('{0} previous watcher end reported by a later watcher{1}' -f (Get-Date).ToString('yyyy-MM-dd HH:mm:ss.fff'), [Environment]::NewLine), [System.Text.Encoding]::UTF8)
+        }
+    } catch { }
+}
+
 function Watch-Icons($cfg, $loc) {
     $once = 0
     if ($env:FLI_TEST_WATCH_ONCE) { [void][int]::TryParse($env:FLI_TEST_WATCH_ONCE, [ref]$once) }
     $debounce = if ($once -gt 0) { 1 } else { $WatchDebounceSeconds }
     $dirs = @($loc.Icons | ForEach-Object { Split-Path -Parent $_.Path } | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Unique)
     foreach ($d in $dirs) { Write-Log "watch: folder $d" }
+    Write-Log "watch: pid $PID"
+    Write-PreviousWatcherEnds
     if ($DryRun) {
         Write-Host "[dry-run] would: open Fluxer on $($cfg.Url), then wait for Fluxer's icons to change and put `"--fluxer-app-url=$($cfg.Url)`" back"
         Write-Log "dry-run: would watch $($dirs.Count) folder(s) and re-apply after a change"
@@ -530,6 +550,7 @@ function Watch-Icons($cfg, $loc) {
             if ($once -gt 0) { Write-Log 'watch: test hook handled one change'; return 0 }
         }
     } finally {
+        Write-Log 'watch: stopped (watcher loop ended or was interrupted)'
         Get-EventSubscriber | Where-Object { $_.SourceIdentifier -like 'FluxerIcons.*' } | Unregister-Event -ErrorAction SilentlyContinue
         foreach ($w in $watchers) { try { $w.EnableRaisingEvents = $false; $w.Dispose() } catch { } }
     }

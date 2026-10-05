@@ -94,7 +94,7 @@ Old settings files that still contain a `shortcut_name` key keep working; the ke
 
 ## Logging
 
-Every run writes one file `logs/YYYY-MM-DD_HH-MM-SS_<action>.log` at the repo root, with every line timestamped. The folder is gitignored and created on first use. Logging is a side channel only: it never changes terminal output or the exit code, and a failure to write a log never breaks a run. Logs can contain the server address, so do not post them unredacted.
+Every run writes one file `logs/YYYY-MM-DD_HH-MM-SS_<action>.log` at the repo root, with every line timestamped. The folder is gitignored and created on first use. Logging is a side channel only: it never changes terminal output or the exit code, and a failure to write a log never breaks a run. Logs can contain the server address, so do not post them unredacted. The watcher also logs its process id at start and a `watch: stopped` line when its loop ends. A watcher killed by logoff, shutdown or Stop-Process cannot log its own end, so the next watcher to start reports any older watcher log with no exit line whose process is gone.
 
 ## Test seams (summary)
 

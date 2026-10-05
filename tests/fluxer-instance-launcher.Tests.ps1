@@ -714,6 +714,23 @@ Describe 'watch action' {
         $r.Code | Should Be 0
         (Get-LnkArgs $sb.Start).Args | Should Be ''
     }
+    It 'logs its pid at start and a stopped line when it ends' {
+        $env:FLI_TEST_WATCH_ONCE = '2'
+        try { $r = Invoke-Launcher $sb 'watch' } finally { Remove-Item Env:\FLI_TEST_WATCH_ONCE -ErrorAction SilentlyContinue }
+        $text = Get-Content -Raw (Get-ChildItem $sb.LogDir -Filter '*_watch*.log' | Sort-Object LastWriteTime, Name | Select-Object -Last 1).FullName
+        $text | Should Match 'watch: pid \d+'
+        $text | Should Match 'watch: stopped'
+    }
+    It 'reports an earlier watcher log that ended without an exit line' {
+        [void][System.IO.Directory]::CreateDirectory($sb.LogDir)
+        $old = Join-Path $sb.LogDir '2000-01-01_00-00-00_watch.log'
+        [System.IO.File]::WriteAllText($old, '2000-01-01 00:00:00.000 watch: pid 999999' + [Environment]::NewLine)
+        $env:FLI_TEST_WATCH_ONCE = '2'
+        try { $r = Invoke-Launcher $sb 'watch' } finally { Remove-Item Env:\FLI_TEST_WATCH_ONCE -ErrorAction SilentlyContinue }
+        $text = Get-Content -Raw (Get-ChildItem $sb.LogDir -Filter '*_watch*.log' | Where-Object Name -ne '2000-01-01_00-00-00_watch.log' | Sort-Object LastWriteTime, Name | Select-Object -Last 1).FullName
+        $text | Should Match 'previous watcher \(pid 999999.*without an exit line'
+        Remove-Item $old -ErrorAction SilentlyContinue
+    }
     It 'patches an icon an update rewrote and tries to close Fluxer on another server' {
         $env:FLI_TEST_WATCH_ONCE = '40'
         try {
