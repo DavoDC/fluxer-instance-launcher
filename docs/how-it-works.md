@@ -27,6 +27,7 @@ These behaviours were read from Fluxer's source and observed on a real install (
 - Install layout: `%LOCALAPPDATA%\fluxer_desktop\` holds `Update.exe`, a small stable `Fluxer.exe` stub that forwards its arguments, and `current\` with the real app. The stub path does not change across updates.
 - Start at login: Fluxer writes a value named `Fluxer.Fluxer` under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`. Its data is the stable `Fluxer.exe` path plus `--autostart`. It writes it on first run, controlled by a marker file `autostart-initialized-v2` in Fluxer's data folder, and again whenever the Desktop settings toggle is switched on. A page on a trusted origin can also trigger it.
 - Icons: Fluxer keeps `Fluxer.lnk` in the Start Menu (under a `Fluxer Platform AB` folder), on the Desktop and as a taskbar pin. It rewrites a shortcut's target if it points at the wrong place, but never touches its arguments.
+- Update download: the in-app update downloads a `Fluxer-<version>-win-x64-full.nupkg` (about 160 MB) into `fluxer_desktop\packages\` (as a `.partial` file until complete), then shows a banner "Restart to finish installing". Nothing under `current\` or the icons changes until Restart is clicked.
 - Updates: the Velopack updater recreates the icons without our flag, and then restarts Fluxer with an empty argument list. So after every in-app update Fluxer comes back on the official server and the icons have lost the flag. Observed on a real update: the Start Menu and taskbar icons lost the flag, status reported them as opening the official server, and the app restarted on the official server. The sign-in Run value of this tool is the one thing that survives, because Fluxer does not write it.
 - The `fluxer://` link handler is rewritten by Fluxer on every launch, so any change to it is lost immediately. The launcher does not touch it.
 
@@ -76,7 +77,7 @@ Because an update strips the flag from the icons and restarts Fluxer on the offi
 - After a change it waits for the changes to settle (a 5 second debounce, because an update touches several files), then runs the `apply` logic, closes Fluxer if it is open on another server, and reopens it on yours.
 - `-NoLaunch`: the helper that Install or `apply` starts does not open Fluxer when it starts, so Install never opens Fluxer by itself. The sign-in Run value does open Fluxer, because that is its purpose. A reopen after an update still happens.
 - It makes no network connections and changes only Fluxer's own icons and Run values.
-- Status: its behaviour against a real Velopack icon rewrite is not yet verified end to end (see known limits).
+- Status: verified on a real Velopack update on 2026-10-05 (2026.1003.65535 to 2026.1004.13532). Timeline from that run: the updater swapped `current\` and rewrote the icons at 10:30:59 to 10:31:02; the watcher saw the icon change at 10:31:02; after the 5 second settle it restored the flag on the Start Menu and taskbar icons at 10:31:07, closed the Fluxer the updater had reopened on the official server, and reopened it on the chosen server at 10:31:09. About 7 seconds from the first icon change to Fluxer back on your server. The same watcher process survived the update, the sign-in Run value `FluxerInstance` was untouched, and Fluxer's own `Fluxer.Fluxer` Run value stayed absent. The user sees the updater window ("Installing Update"), Fluxer open briefly on the official server, close, and open again on the right server.
 
 ## Settings
 
@@ -107,7 +108,7 @@ An earlier version made a custom-named shortcut. It was dropped: patching Fluxer
 ## Known limits and accepted exceptions
 
 - Every Fluxer update undoes the icon patch and restarts Fluxer on the official server. Without the watcher, run Install again; the status at the top of the menu tells you.
-- The watcher's behaviour against a real Velopack rewrite is unverified; it is covered by tests that simulate the change, not by a live update.
+- After an update there is a short flash: Fluxer reopens on the official server for a few seconds before the watcher closes it and reopens it on yours (observed live, see the watcher section). The first window cannot be avoided because the updater starts it before the watcher can act.
 - Whether Fluxer's own sign-in value was on before Install cannot be known if Install ran before state saving existed; in that case Uninstall leaves it as it is and invents nothing.
 - Windows only. The tool needs Windows PowerShell 5.1, which ships with Windows 10 and 11. No administrator rights are needed.
 - Not tested: whether a crafted `fluxer://` link can inject extra launch options while Fluxer is closed. That would affect every Fluxer user with or without this tool, which is why the tool does not touch the handler.
