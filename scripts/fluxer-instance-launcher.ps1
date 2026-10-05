@@ -204,9 +204,13 @@ function Save-FluxerRunOriginal($loc) {
     Write-Log "state: saved original of $FluxerRunValueName (kind $kind) to $($loc.StatePath)"
 }
 
+# conhost.exe --headless gives the helper a console with no window at all. -WindowStyle Hidden alone is ignored when
+# Windows Terminal is the default terminal host (a window stays on screen, and Fluxer prints its logs into it).
+$ConhostExe = Join-Path $env:SystemRoot 'System32\conhost.exe'
+
 function Get-ExpectedRunValue($cfg) {
     $mode = if ($cfg.WatchUpdates) { 'watch' } else { 'launch' }
-    '"{0}" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{1}" {3} -DelaySeconds {2}' -f $PowerShellExe, $ScriptPath, $cfg.AutostartDelay, $mode
+    '"{4}" --headless "{0}" -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "{1}" {3} -DelaySeconds {2}' -f $PowerShellExe, $ScriptPath, $cfg.AutostartDelay, $mode, $ConhostExe
 }
 
 $UrlFlagPattern = '--fluxer-app-url=("[^"]*"|\S*)'
@@ -479,10 +483,10 @@ function Start-WatcherNow($cfg) {
     if (-not $cfg.WatchUpdates) { Write-Log 'watcher: watch_updates is off, not starting the helper'; return }
     $running = @(Get-WatcherProcesses)
     if ($running.Count -gt 0) { Write-Log "watcher: already running (PID $($running[0].ProcessId)), not starting another"; return }
-    $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', ('"{0}"' -f $ScriptPath), 'watch', '-NoLaunch', '-DelaySeconds', [string]$cfg.AutostartDelay)
+    $argList = @('--headless', ('"{0}"' -f $PowerShellExe), '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', ('"{0}"' -f $ScriptPath), 'watch', '-NoLaunch', '-DelaySeconds', [string]$cfg.AutostartDelay)
     Invoke-Change 'start the background update helper' {
-        if ($env:FLI_TEST_NO_SPAWN -eq '1') { Write-Log "watcher: would start watcher (FLI_TEST_NO_SPAWN=1): $PowerShellExe $($argList -join ' ')" }
-        else { Start-Process -FilePath $PowerShellExe -ArgumentList $argList -WindowStyle Hidden; Write-Log "watcher: started: $PowerShellExe $($argList -join ' ')" }
+        if ($env:FLI_TEST_NO_SPAWN -eq '1') { Write-Log "watcher: would start watcher (FLI_TEST_NO_SPAWN=1): $ConhostExe $($argList -join ' ')" }
+        else { Start-Process -FilePath $ConhostExe -ArgumentList $argList -WindowStyle Hidden; Write-Log "watcher: started: $ConhostExe $($argList -join ' ')" }
     } 'started the background update helper'
 }
 

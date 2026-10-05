@@ -631,6 +631,10 @@ Describe 'Run value form for watch off and on' {
         $on | Should Match '-WindowStyle Hidden'
         $on | Should Match 'fluxer-instance-launcher\.ps1" watch -DelaySeconds 15'
     }
+    It 'both forms start through conhost --headless so no console window shows (Windows Terminal ignores -WindowStyle Hidden)' {
+        $off | Should Match '^"[^"]*conhost\.exe" --headless "[^"]*powershell\.exe" -NoProfile'
+        $on | Should Match '^"[^"]*conhost\.exe" --headless "[^"]*powershell\.exe" -NoProfile'
+    }
     Remove-Sandbox $sb
 }
 
@@ -963,6 +967,9 @@ Describe 'the started helper does not open Fluxer, the sign-in Run value does' {
         Set-WatchConfig $sb $true
         [void](Invoke-Launcher $sb 'apply')
         (Get-LastLog2 $sb) | Should Match 'would start watcher.*\bwatch -NoLaunch\b'
+    }
+    It 'Start-WatcherNow starts the helper through conhost --headless' {
+        (Get-LastLog2 $sb) | Should Match 'would start watcher.*conhost\.exe --headless .*powershell\.exe'
     }
     It 'the sign-in Run value form has no -NoLaunch' {
         $v = Get-RunValue $sb 'FluxerInstance'
